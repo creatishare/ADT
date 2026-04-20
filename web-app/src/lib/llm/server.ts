@@ -59,6 +59,7 @@ export function createModel(modelId: ModelId) {
       const provider = createOpenAI({
         apiKey: requireEnv("MOONSHOT_API_KEY", modelId),
         baseURL: process.env.MOONSHOT_BASE_URL || "https://api.moonshot.cn/v1",
+        compatibility: "compatible",
       });
       return provider.chat(process.env.MOONSHOT_MODEL || "kimi-k2.5");
     }
@@ -67,6 +68,7 @@ export function createModel(modelId: ModelId) {
       const provider = createOpenAI({
         apiKey: requireEnv("DEEPSEEK_API_KEY", modelId),
         baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+        compatibility: "compatible",
       });
       return provider.chat(process.env.DEEPSEEK_MODEL || "deepseek-chat");
     }
@@ -77,6 +79,7 @@ export function createModel(modelId: ModelId) {
         baseURL:
           process.env.DOUBAO_BASE_URL ||
           "https://ark.cn-beijing.volces.com/api/v3",
+        compatibility: "compatible",
       });
       return provider.chat(process.env.DOUBAO_MODEL || "doubao-seed-2.0-pro");
     }
