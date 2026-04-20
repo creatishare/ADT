@@ -1,0 +1,14 @@
+# Non-app planning & workspace files
+workspace/
+
+# Claude Code config & memory
+.claude/
+MEMORY.md
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
