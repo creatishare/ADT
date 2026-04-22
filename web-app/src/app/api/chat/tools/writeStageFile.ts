@@ -20,11 +20,18 @@ export function createWriteStageFileTool(subAgentModel: LanguageModel) {
         .describe(
           "【极其重要】从对话历史中总结出的用户指导、排版偏好或用词规则。必须传递！"
         ),
+      courseCode: z
+        .string()
+        .optional()
+        .describe(
+          "课程编号，格式：L{单元}-{课节}-{高/低年级}-题组{编号}，如 L3-1-高-题组2。从课节文档文件名或内容中提取。"
+        ),
     }),
     execute: async ({
       validatedDocument,
       worldview,
       userGuidance,
+      courseCode,
     }): Promise<ToolOutput> => {
       let prompt = `【世界观设定】：\n${worldview}\n\n【通过验证的策划方案】：\n${validatedDocument}\n\n`;
       if (userGuidance) {
@@ -40,7 +47,7 @@ export function createWriteStageFileTool(subAgentModel: LanguageModel) {
 
       return {
         content: text,
-        artifact: { title: "关卡设计介绍文档", type: "markdown", content: text },
+        artifact: { title: "关卡设计介绍文档", type: "markdown", content: text, courseCode },
       };
     },
   });

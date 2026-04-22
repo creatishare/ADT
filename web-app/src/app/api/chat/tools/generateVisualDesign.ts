@@ -17,8 +17,14 @@ export function createGenerateVisualDesignTool(subAgentModel: LanguageModel) {
         .describe(
           "【极其重要】用户对于画面色调、艺术风格的偏好。必须传递！"
         ),
+      courseCode: z
+        .string()
+        .optional()
+        .describe(
+          "课程编号，格式：L{单元}-{课节}-{高/低年级}-题组{编号}，如 L3-1-高-题组2。从课节文档文件名或内容中提取。"
+        ),
     }),
-    execute: async ({ finalDocument, userGuidance }): Promise<ToolOutput> => {
+    execute: async ({ finalDocument, userGuidance, courseCode }): Promise<ToolOutput> => {
       let prompt = `【关卡设计介绍文档】：\n${finalDocument}\n\n`;
       if (userGuidance) {
         prompt += `【用户对于画面和美术风格的要求 (重要！)】：\n${userGuidance}\n\n`;
@@ -35,7 +41,7 @@ export function createGenerateVisualDesignTool(subAgentModel: LanguageModel) {
 
       return {
         content: visualContent,
-        artifact: { title: "即梦提示词", type: "markdown", content: visualContent },
+        artifact: { title: "即梦提示词", type: "markdown", content: visualContent, courseCode },
       };
     },
   });

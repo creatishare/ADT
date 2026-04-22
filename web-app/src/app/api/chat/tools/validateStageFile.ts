@@ -19,12 +19,19 @@ export function createValidateStageFileTool(subAgentModel: LanguageModel) {
         .describe(
           "【极其重要】用户特别关心的验证重点或之前的踩坑点。必须传递！"
         ),
+      courseCode: z
+        .string()
+        .optional()
+        .describe(
+          "课程编号，格式：L{单元}-{课节}-{高/低年级}-题组{编号}，如 L3-1-高-题组2。从课节文档文件名或内容中提取。"
+        ),
     }),
     execute: async ({
       documentContent,
       worldview,
       topicInfo,
       userGuidance,
+      courseCode,
     }): Promise<ToolOutput> => {
       let prompt = `【世界观设定】：\n${worldview}\n\n【知识点信息】：\n${topicInfo}\n\n【需要审查的初步策划文档】：\n${documentContent}\n\n`;
       if (userGuidance) {
@@ -40,7 +47,7 @@ export function createValidateStageFileTool(subAgentModel: LanguageModel) {
 
       return {
         content: text,
-        artifact: { title: "验证报告", type: "markdown", content: text },
+        artifact: { title: "验证报告", type: "markdown", content: text, courseCode },
       };
     },
   });

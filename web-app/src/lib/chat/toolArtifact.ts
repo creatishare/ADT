@@ -2,6 +2,7 @@ export type ToolArtifact = {
   title: string;
   type: "markdown" | "image" | "code";
   content: string;
+  courseCode?: string;
 };
 
 function isToolArtifact(value: unknown): value is ToolArtifact {

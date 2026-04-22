@@ -112,25 +112,30 @@ export function ArtifactArea({ className }: { className?: string }) {
             暂未生成工件
           </div>
         )}
-        {sortedArtifacts.map((artifact) => (
-          <button
-            key={artifact.id}
-            onClick={() => setActiveArtifact(artifact.id)}
-            className={cn(
-              "whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors",
-              activeArtifactId === artifact.id
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-            )}
-          >
-            {artifact.type === "markdown"
-              ? "📄 "
-              : artifact.type === "image"
-              ? "🖼️ "
-              : "💻 "}
-            {artifact.title}
-          </button>
-        ))}
+        {sortedArtifacts.map((artifact) => {
+          const label = artifact.courseCode
+            ? `${artifact.courseCode} ${artifact.title}`
+            : artifact.title;
+          return (
+            <button
+              key={artifact.id}
+              onClick={() => setActiveArtifact(artifact.id)}
+              className={cn(
+                "whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors",
+                activeArtifactId === artifact.id
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+              )}
+            >
+              {artifact.type === "markdown"
+                ? "📄 "
+                : artifact.type === "image"
+                ? "🖼️ "
+                : "💻 "}
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Render Area */}
@@ -150,7 +155,9 @@ export function ArtifactArea({ className }: { className?: string }) {
                   data-testid={artifactTestIds.activeTitle}
                   className="text-xl font-semibold text-gray-900"
                 >
-                  {activeArtifact.title}
+                  {activeArtifact.courseCode
+                    ? `${activeArtifact.courseCode} ${activeArtifact.title}`
+                    : activeArtifact.title}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
                   {getArtifactTypeLabel(activeArtifact.type)} ·{" "}

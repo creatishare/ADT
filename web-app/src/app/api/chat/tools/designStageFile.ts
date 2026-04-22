@@ -26,6 +26,12 @@ export function createDesignStageFileTool(subAgentModel: LanguageModel) {
         .describe(
           "【极其重要】从对话历史中总结出的用户指导、偏好、修改意见和避坑规则。必须传递给子Agent！"
         ),
+      courseCode: z
+        .string()
+        .optional()
+        .describe(
+          "课程编号，格式：L{单元}-{课节}-{高/低年级}-题组{编号}，如 L3-1-高-题组2。从课节文档文件名或内容中提取。"
+        ),
     }),
     execute: async ({
       topicInfo,
@@ -33,6 +39,7 @@ export function createDesignStageFileTool(subAgentModel: LanguageModel) {
       mode,
       selectedConcepts,
       userGuidance,
+      courseCode,
     }): Promise<ToolOutput> => {
       let prompt = "";
       if (mode === "generate_concepts") {
@@ -59,7 +66,7 @@ export function createDesignStageFileTool(subAgentModel: LanguageModel) {
         mode === "generate_concepts" ? "核心包装概念" : "初步策划文档";
       return {
         content: text,
-        artifact: { title, type: "markdown", content: text },
+        artifact: { title, type: "markdown", content: text, courseCode },
       };
     },
   });

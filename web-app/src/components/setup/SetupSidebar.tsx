@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useSetupStore } from "@/store/useSetupStore";
 import { useArtifactStore } from "@/store/useArtifactStore";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,11 @@ import {
   X,
   FileText,
   Download,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { formatTimestamp } from "@/lib/chat/artifactParser";
 
 interface UploadedDoc {
   name: string;
@@ -57,15 +61,28 @@ ${lessonDoc.content}
 请按照7步法工作流，从第一个题组开始，依次生成各题组的核心包装概念。请先针对第一个题组生成5个候选概念供我筛选。`;
 }
 
-function downloadArtifacts(artifacts: Array<{ title: string; content: string; timestamp: number }>) {
-  const sorted = [...artifacts].sort((a, b) => a.timestamp - b.timestamp);
-  const parts = sorted.map(
-    (a) => `# ${a.title}\n\n${a.content}\n\n---\n`
-  );
-  const blob = new Blob([parts.join("\n")], {
-    type: "text/markdown;charset=utf-8",
+function buildDownloadBlob(
+  artifacts: Array<{ title: string; content: string; timestamp: number; courseCode?: string }>
+) {
+  const parts = artifacts.map((a) => {
+    const heading = a.courseCode ? `${a.courseCode} ${a.title}` : a.title;
+    return `# ${heading}\n\n${a.content}\n\n---\n`;
   });
+  return new Blob([parts.join("\n")], { type: "text/markdown;charset=utf-8" });
+}
+
+function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function makeDownloadFilename() {
   const dateStr = new Date()
     .toLocaleString("zh-CN", {
       hour12: false,
@@ -75,13 +92,7 @@ function downloadArtifacts(artifacts: Array<{ title: string; content: string; ti
       minute: "2-digit",
     })
     .replace(/[/:\s]/g, "_");
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `关卡设计成果_${dateStr}.md`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  return `关卡设计成果_${dateStr}.md`;
 }
 
 export function SetupSidebar() {
@@ -94,9 +105,14 @@ export function SetupSidebar() {
     setLessonDoc,
     setInitialPrompt,
   } = useSetupStore();
-  const { artifacts } = useArtifactStore();
+  const { artifacts, deleteArtifact } = useArtifactStore();
   const worldInputRef = useRef<HTMLInputElement>(null);
   const lessonInputRef = useRef<HTMLInputElement>(null);
+
+  const [isManaging, setIsManaging] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const sortedArtifacts = [...artifacts].sort((a, b) => a.timestamp - b.timestamp);
 
   const handleWorldUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -119,8 +135,35 @@ export function SetupSidebar() {
     toggleCollapse();
   };
 
-  const handleDownload = () => {
-    downloadArtifacts(artifacts);
+  const openManagePanel = () => {
+    setSelectedIds(sortedArtifacts.map((a) => a.id));
+    setIsManaging(true);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === sortedArtifacts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(sortedArtifacts.map((a) => a.id));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleDelete = (id: string) => {
+    deleteArtifact(id);
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+  };
+
+  const handleDownloadSelected = () => {
+    const selected = sortedArtifacts.filter((a) => selectedIds.includes(a.id));
+    if (selected.length === 0) return;
+    const blob = buildDownloadBlob(selected);
+    triggerDownload(blob, makeDownloadFilename());
   };
 
   if (isCollapsed) {
@@ -178,11 +221,99 @@ export function SetupSidebar() {
           开始策划
         </Button>
 
-        {artifacts.length > 0 && (
-          <Button variant="outline" onClick={handleDownload} className="w-full">
-            <Download className="h-4 w-4 mr-1.5" />
-            下载成果 ({artifacts.length} 个)
-          </Button>
+        {sortedArtifacts.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <button
+              type="button"
+              onClick={() => (isManaging ? setIsManaging(false) : openManagePanel())}
+              className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <Download className="h-4 w-4 text-gray-500" />
+                成果管理
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                  {sortedArtifacts.length} 个
+                </span>
+              </span>
+              {isManaging ? (
+                <ChevronUp className="h-4 w-4 text-gray-400" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              )}
+            </button>
+
+            {isManaging && (
+              <div className="border-t border-gray-100">
+                {/* Select-all toolbar */}
+                <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAll}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    {selectedIds.length === sortedArtifacts.length
+                      ? "取消全选"
+                      : "全选"}
+                  </button>
+                  <span className="text-xs text-gray-400">
+                    已选 {selectedIds.length} / {sortedArtifacts.length}
+                  </span>
+                </div>
+
+                {/* Artifact list */}
+                <ul className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                  {sortedArtifacts.map((artifact) => {
+                    const label = artifact.courseCode
+                      ? `${artifact.courseCode} ${artifact.title}`
+                      : artifact.title;
+                    const isSelected = selectedIds.includes(artifact.id);
+                    return (
+                      <li
+                        key={artifact.id}
+                        className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(artifact.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 accent-blue-600 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-gray-800">
+                            {label}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {formatTimestamp(artifact.timestamp)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(artifact.id)}
+                          title="删除此成果"
+                          className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {/* Download footer */}
+                <div className="border-t border-gray-100 p-3">
+                  <Button
+                    disabled={selectedIds.length === 0}
+                    onClick={handleDownloadSelected}
+                    className="w-full"
+                    size="sm"
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    下载选中 ({selectedIds.length} 个)
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

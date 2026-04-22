@@ -9,6 +9,7 @@ interface Artifact {
   title: string;
   content: string; // Markdown text or Image URL
   timestamp: number;
+  courseCode?: string;
 }
 
 interface ArtifactStore {
@@ -17,6 +18,7 @@ interface ArtifactStore {
   addArtifact: (artifact: Omit<Artifact, 'timestamp'>) => void;
   setActiveArtifact: (id: string | null) => void;
   updateArtifactContent: (id: string, content: string) => void;
+  deleteArtifact: (id: string) => void;
   clearArtifacts: () => void;
 }
 
@@ -44,6 +46,15 @@ export const useArtifactStore = create<ArtifactStore>()(
             a.id === id ? { ...a, content } : a
           ),
         })),
+      deleteArtifact: (id) =>
+        set((state) => {
+          const remaining = state.artifacts.filter((a) => a.id !== id);
+          const activeId =
+            state.activeArtifactId === id
+              ? (remaining[0]?.id ?? null)
+              : state.activeArtifactId;
+          return { artifacts: remaining, activeArtifactId: activeId };
+        }),
       clearArtifacts: () => set({ artifacts: [], activeArtifactId: null }),
     }),
     {

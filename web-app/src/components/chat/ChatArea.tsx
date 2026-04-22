@@ -36,6 +36,23 @@ function getMessageText(message: UIMessage) {
     .join("\n");
 }
 
+const SETUP_MESSAGE_PREFIX = "请根据以下资料开始关卡设计流程";
+
+function getDisplayText(message: UIMessage): string {
+  const text = getMessageText(message);
+  if (message.role !== "user" || !text.startsWith(SETUP_MESSAGE_PREFIX)) {
+    return text;
+  }
+  const lessonMatch = text.match(/## 课节知识点整理文档\n文件名：(.+)/);
+  const filename = lessonMatch?.[1]?.trim() ?? "";
+  const courseMatch = filename.match(/L\d+-\d+-[高低]年级/);
+  if (courseMatch) {
+    return `开始进行 ${courseMatch[0]} 关卡策划`;
+  }
+  const nameWithoutExt = filename.replace(/\.[^.]+$/, "") || "关卡";
+  return `开始进行关卡策划（${nameWithoutExt}）`;
+}
+
 function getToolDisplayName(toolName: string) {
   const toolNameMap: Record<string, string> = {
     designStageFile: "关卡策划师",
@@ -110,6 +127,7 @@ export function ChatArea({ className }: { className?: string }) {
         title: artifact.title,
         type: artifact.type,
         content: artifact.content,
+        courseCode: artifact.courseCode,
       });
     });
   }, [toolParts, addArtifact]);
@@ -214,7 +232,7 @@ export function ChatArea({ className }: { className?: string }) {
                     : "bg-white border border-gray-200 text-gray-800"
                 )}
               >
-                <div className="whitespace-pre-wrap">{getMessageText(m)}</div>
+                <div className="whitespace-pre-wrap">{getDisplayText(m)}</div>
 
                 {m.parts.filter(isToolLikePart).map((toolPart) => {
                   const toolCallId = toolPart.toolCallId;
