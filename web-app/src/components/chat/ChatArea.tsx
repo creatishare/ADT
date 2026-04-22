@@ -10,6 +10,13 @@ import { useSetupStore } from "@/store/useSetupStore";
 import { useModelStore } from "@/store/useModelStore";
 import { ModelPicker } from "./ModelPicker";
 import { Paperclip, X } from "lucide-react";
+import {
+  parseAwaitingUser,
+  parseOrchestratorState,
+  stripOrchestratorMeta,
+  getAwaitingUserLabel,
+  type OrchestratorState,
+} from "@/lib/chat/artifactParser";
 
 type MessagePart = UIMessage["parts"][number];
 type ToolLikePart = Extract<MessagePart, { toolCallId: string }>;
@@ -40,6 +47,9 @@ const SETUP_MESSAGE_PREFIX = "请根据以下资料开始关卡设计流程";
 
 function getDisplayText(message: UIMessage): string {
   const text = getMessageText(message);
+  if (message.role === "assistant") {
+    return stripOrchestratorMeta(text);
+  }
   if (message.role !== "user" || !text.startsWith(SETUP_MESSAGE_PREFIX)) {
     return text;
   }
@@ -114,6 +124,16 @@ export function ChatArea({ className }: { className?: string }) {
     () => messages.flatMap((message) => message.parts.filter(isToolLikePart)),
     [messages]
   );
+
+  const latestState: OrchestratorState | null = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const parsed = parseOrchestratorState(getMessageText(m));
+      if (parsed) return parsed;
+    }
+    return null;
+  }, [messages]);
 
   useEffect(() => {
     toolParts.forEach((toolPart) => {
@@ -204,6 +224,51 @@ export function ChatArea({ className }: { className?: string }) {
         <ModelPicker />
       </div>
 
+      {/* Orchestrator progress */}
+      {latestState && (
+        <div className="border-b border-gray-200 bg-blue-50/60 px-4 py-2 text-xs text-gray-700">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {latestState.currentStep !== null && (
+              <span className="font-semibold text-blue-700">
+                第 {latestState.currentStep}/7 步
+              </span>
+            )}
+            {latestState.currentLesson && (
+              <span>课节：{latestState.currentLesson}</span>
+            )}
+            {latestState.totalGroups !== null && (
+              <span>
+                进度：{latestState.processedGroups.length}/
+                {latestState.totalGroups} 题组
+                {latestState.currentGroup
+                  ? `（当前 ${latestState.currentGroup}）`
+                  : ""}
+              </span>
+            )}
+            {latestState.accumulatedGuidance.length > 0 && (
+              <span className="text-gray-500">
+                已记录 {latestState.accumulatedGuidance.length} 条用户偏好
+              </span>
+            )}
+          </div>
+          {latestState.totalGroups !== null && latestState.totalGroups > 0 && (
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-blue-100">
+              <div
+                className="h-full bg-blue-500 transition-all"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (latestState.processedGroups.length /
+                      latestState.totalGroups) *
+                      100
+                  )}%`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Message List */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6" data-testid={chatTestIds.messageList}>
         {messages.length === 0 ? (
@@ -233,6 +298,27 @@ export function ChatArea({ className }: { className?: string }) {
                 )}
               >
                 <div className="whitespace-pre-wrap">{getDisplayText(m)}</div>
+
+                {m.role === "assistant" &&
+                  (() => {
+                    const awaiting = parseAwaitingUser(getMessageText(m));
+                    if (!awaiting) return null;
+                    return (
+                      <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <div className="flex items-start gap-2">
+                          <span className="text-base leading-none">⏸️</span>
+                          <div>
+                            <div className="font-semibold">
+                              等待人工确认
+                            </div>
+                            <div className="mt-0.5 text-xs">
+                              {getAwaitingUserLabel(awaiting)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 {m.parts.filter(isToolLikePart).map((toolPart) => {
                   const toolCallId = toolPart.toolCallId;

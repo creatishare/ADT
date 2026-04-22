@@ -7,8 +7,10 @@ import {
   buildLayeredMemoryContext,
   buildTranscript,
   normalizeMessages,
+  getMessageText,
   type RequestMessage,
 } from "../../../lib/chat/memory";
+import { parseOrchestratorState } from "@/lib/chat/artifactParser";
 import {
   createDesignStageFileTool,
   createWriteStageFileTool,
@@ -229,6 +231,23 @@ function createChatTestModeResponse(scenario: ChatTestScenario): ChatTestRespons
   }
 }
 
+/**
+ * Walk back through history to find the most recent accumulatedGuidance from
+ * an assistant state block. Used as a server-side safety net in case the LLM
+ * forgets to pass userGuidance to a sub-agent tool.
+ */
+function extractLatestGuidance(messages: RequestMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const state = parseOrchestratorState(getMessageText(m));
+    if (state && state.accumulatedGuidance.length > 0) {
+      return state.accumulatedGuidance.map((line) => `- ${line}`).join("\n");
+    }
+  }
+  return "";
+}
+
 // ---------------------------------------------------------------------------
 // Memory
 // ---------------------------------------------------------------------------
@@ -309,6 +328,14 @@ export async function POST(req: Request) {
       ? await buildMemoryContext(requestMessages, subAgentModel)
       : "";
 
+  const fallbackGuidance = extractLatestGuidance(requestMessages);
+
+  if (debugEnabled && fallbackGuidance) {
+    logChatDebug("request.fallback-guidance", {
+      lines: fallbackGuidance.split("\n").length,
+    });
+  }
+
   if (debugEnabled) {
     logChatDebug("request.pre-stream", {
       recentMessages: recentMessages.length,
@@ -356,10 +383,10 @@ export async function POST(req: Request) {
         }
       },
       tools: {
-        designStageFile: createDesignStageFileTool(subAgentModel),
-        writeStageFile: createWriteStageFileTool(subAgentModel),
-        validateStageFile: createValidateStageFileTool(subAgentModel),
-        generateVisualDesign: createGenerateVisualDesignTool(subAgentModel),
+        designStageFile: createDesignStageFileTool(subAgentModel, fallbackGuidance),
+        writeStageFile: createWriteStageFileTool(subAgentModel, fallbackGuidance),
+        validateStageFile: createValidateStageFileTool(subAgentModel, fallbackGuidance),
+        generateVisualDesign: createGenerateVisualDesignTool(subAgentModel, fallbackGuidance),
       },
     });
   } catch (error) {

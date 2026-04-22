@@ -3,7 +3,10 @@ import { z } from "zod";
 import { VISUAL_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
 
-export function createGenerateVisualDesignTool(subAgentModel: LanguageModel) {
+export function createGenerateVisualDesignTool(
+  subAgentModel: LanguageModel,
+  fallbackGuidance: string = ""
+) {
   return tool({
     description:
       "第七步后：根据最终输出的《关卡设计介绍文档》生成即梦提示词 (JM-VisualDesigner)。",
@@ -25,9 +28,10 @@ export function createGenerateVisualDesignTool(subAgentModel: LanguageModel) {
         ),
     }),
     execute: async ({ finalDocument, userGuidance, courseCode }): Promise<ToolOutput> => {
+      const effectiveGuidance = userGuidance?.trim() || fallbackGuidance;
       let prompt = `【关卡设计介绍文档】：\n${finalDocument}\n\n`;
-      if (userGuidance) {
-        prompt += `【用户对于画面和美术风格的要求 (重要！)】：\n${userGuidance}\n\n`;
+      if (effectiveGuidance) {
+        prompt += `【用户对于画面和美术风格的要求 (重要！)】：\n${effectiveGuidance}\n\n`;
       }
       prompt += `请提取视觉需求，并输出符合要求的、精准的英文提示词（需说明 2K, 4:3 设置，同题组去重）。`;
 

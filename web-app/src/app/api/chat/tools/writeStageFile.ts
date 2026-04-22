@@ -3,7 +3,10 @@ import { z } from "zod";
 import { WRITER_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
 
-export function createWriteStageFileTool(subAgentModel: LanguageModel) {
+export function createWriteStageFileTool(
+  subAgentModel: LanguageModel,
+  fallbackGuidance: string = ""
+) {
   return tool({
     description:
       "第七步：将通过验证的初步策划方案转化为面向编剧老师的《关卡设计介绍文档》。",
@@ -33,9 +36,10 @@ export function createWriteStageFileTool(subAgentModel: LanguageModel) {
       userGuidance,
       courseCode,
     }): Promise<ToolOutput> => {
+      const effectiveGuidance = userGuidance?.trim() || fallbackGuidance;
       let prompt = `【世界观设定】：\n${worldview}\n\n【通过验证的策划方案】：\n${validatedDocument}\n\n`;
-      if (userGuidance) {
-        prompt += `【用户特别指导意见 (重要！)】：\n${userGuidance}\n\n`;
+      if (effectiveGuidance) {
+        prompt += `【用户特别指导意见 (重要！)】：\n${effectiveGuidance}\n\n`;
       }
       prompt += `请将以上内容扩展撰写为正式落地的《关卡设计介绍文档》。包含关卡设计总览表、单个关卡的详细方案（附前后剧情）以及可替换效果类型表。`;
 

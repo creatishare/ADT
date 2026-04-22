@@ -39,8 +39,7 @@ test.describe("chat workspace", () => {
     await expect(page.locator(selectors.chatSendButton)).toBeEnabled();
     await page.locator(selectors.chatSendButton).click();
 
-    await expect(page.locator(selectors.chatLoadingState)).toBeVisible();
-    await expect(page.locator(selectors.chatLoadingState)).toBeHidden();
+    await expect(page.locator(selectors.artifactActiveTitle)).toBeVisible({ timeout: 15000 });
 
     await expect(page.locator(selectors.chatMessageList)).toContainText(
       "稳定的测试工件"
@@ -151,6 +150,37 @@ test.describe("mobile tab switching", () => {
     // Badge count should be visible on the tab button
     const artifactTabBtn = page.getByRole("button", { name: /设计文档/ });
     await expect(artifactTabBtn).toContainText("1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Artifact markdown rendering
+// ---------------------------------------------------------------------------
+
+test.describe("artifact markdown rendering", () => {
+  test("renders markdown headings and lists as HTML elements", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    await page
+      .locator(selectors.chatInput)
+      .fill("请生成 [test-scenario:success]");
+    await page.locator(selectors.chatSendButton).click();
+    await expect(page.locator(selectors.artifactActiveTitle)).toBeVisible({ timeout: 15000 });
+
+    const content = page.locator(selectors.artifactContent);
+
+    // Headings must be rendered as <h1>/<h2>, not as raw "##" text
+    await expect(content.locator("h1")).toBeVisible();
+    await expect(content.locator("h2").first()).toBeVisible();
+
+    // List items must be rendered as <li>, not as raw "- " text
+    await expect(content.locator("li").first()).toBeVisible();
+
+    // Raw markdown syntax must NOT appear as plain text
+    await expect(content).not.toContainText("## 方案");
+    await expect(content).not.toContainText("# 核心");
   });
 });
 

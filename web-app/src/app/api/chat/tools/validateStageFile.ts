@@ -3,7 +3,10 @@ import { z } from "zod";
 import { VALIDATOR_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
 
-export function createValidateStageFileTool(subAgentModel: LanguageModel) {
+export function createValidateStageFileTool(
+  subAgentModel: LanguageModel,
+  fallbackGuidance: string = ""
+) {
   return tool({
     description:
       "第四步：验证策划师输出的初步策划文档是否包含魔法、逻辑是否自洽。",
@@ -33,9 +36,10 @@ export function createValidateStageFileTool(subAgentModel: LanguageModel) {
       userGuidance,
       courseCode,
     }): Promise<ToolOutput> => {
+      const effectiveGuidance = userGuidance?.trim() || fallbackGuidance;
       let prompt = `【世界观设定】：\n${worldview}\n\n【知识点信息】：\n${topicInfo}\n\n【需要审查的初步策划文档】：\n${documentContent}\n\n`;
-      if (userGuidance) {
-        prompt += `【用户特别关注的审查重点 (重要！)】：\n${userGuidance}\n\n`;
+      if (effectiveGuidance) {
+        prompt += `【用户特别关注的审查重点 (重要！)】：\n${effectiveGuidance}\n\n`;
       }
       prompt += `请严格按照标准审查以上文档，发现任何"魔法元素"直接一票否决。输出带表格的验证报告和具体修改建议。`;
 

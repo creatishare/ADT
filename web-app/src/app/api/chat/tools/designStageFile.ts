@@ -4,7 +4,10 @@ import { generateText, type LanguageModel } from "ai";
 import { DESIGNER_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
 
-export function createDesignStageFileTool(subAgentModel: LanguageModel) {
+export function createDesignStageFileTool(
+  subAgentModel: LanguageModel,
+  fallbackGuidance: string = ""
+) {
   return tool({
     description:
       "第一步/第六步：针对单个题组，根据核心知识点和世界观生成5个核心包装概念，或者将选中概念整合为初步策划文档。",
@@ -41,17 +44,18 @@ export function createDesignStageFileTool(subAgentModel: LanguageModel) {
       userGuidance,
       courseCode,
     }): Promise<ToolOutput> => {
+      const effectiveGuidance = userGuidance?.trim() || fallbackGuidance;
       let prompt = "";
       if (mode === "generate_concepts") {
         prompt = `【世界观设定】：\n${worldview}\n\n【题组信息】：\n${topicInfo}\n\n`;
-        if (userGuidance) {
-          prompt += `【用户特别指导意见 (重要！)】：\n${userGuidance}\n\n`;
+        if (effectiveGuidance) {
+          prompt += `【用户特别指导意见 (重要！)】：\n${effectiveGuidance}\n\n`;
         }
         prompt += `请严格遵循无魔法、科学具象化原则，针对当前这一个题组，生成5个高质量的"核心包装概念"。`;
       } else {
         prompt = `【世界观设定】：\n${worldview}\n\n【选定的概念信息】：\n${selectedConcepts}\n\n`;
-        if (userGuidance) {
-          prompt += `【用户特别指导意见 (重要！)】：\n${userGuidance}\n\n`;
+        if (effectiveGuidance) {
+          prompt += `【用户特别指导意见 (重要！)】：\n${effectiveGuidance}\n\n`;
         }
         prompt += `请将以上选中的概念整合成一份完整的"初步策划文档"。包含：关卡编号、效果描述、映射关系（表格形式），以及题组前后剧情衔接。`;
       }

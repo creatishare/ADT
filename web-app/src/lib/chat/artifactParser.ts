@@ -161,3 +161,145 @@ export function getParsedContent(content: string): string {
     return content;
   }
 }
+
+/**
+ * Normalize LLM-generated markdown so remark-gfm can render tables/lists.
+ *
+ * Common LLM quirks we fix:
+ * 1. Em/en-dashes (—/–) used as bullet markers → convert to "-".
+ * 2. Em-dashes used in table separator rows (|———|———|) → convert to "-".
+ * 3. Tables indented because they sit inside a list item → dedent and
+ *    surround with blank lines so remark-gfm recognises them as tables.
+ */
+export function normalizeMarkdown(content: string): string {
+  // Strip wrapping code fences that LLMs sometimes add around their markdown output.
+  let out = content
+    .replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/, "$1")
+    .trimStart();
+
+  // 1. List bullets using Chinese-style dashes at line start (with optional indent).
+  out = out.replace(/^(\s*)[–—]\s+/gm, "$1- ");
+
+  // 2. Table separator rows: a line that is only pipes + dashes/em-dashes/spaces.
+  out = out.replace(
+    /^(\s*)\|([\s\-—–|:]+)\|[ \t]*$/gm,
+    (_match, indent: string, middle: string) => {
+      const normalized = middle.replace(/[—–]/g, "-");
+      return `${indent}|${normalized}|`;
+    }
+  );
+
+  // 3. Dedent tables & pad with blank lines so GFM parser kicks in.
+  const lines = out.split("\n");
+  const result: string[] = [];
+  let i = 0;
+  const isTableLine = (line: string) =>
+    /^\s*\|.*\|\s*$/.test(line) && line.trim().length > 2;
+
+  while (i < lines.length) {
+    if (isTableLine(lines[i]) && i + 1 < lines.length && isTableLine(lines[i + 1])) {
+      const block: string[] = [];
+      while (i < lines.length && isTableLine(lines[i])) {
+        block.push(lines[i].replace(/^\s+/, ""));
+        i += 1;
+      }
+      if (result.length > 0 && result[result.length - 1].trim() !== "") {
+        result.push("");
+      }
+      result.push(...block);
+      if (i < lines.length && lines[i].trim() !== "") {
+        result.push("");
+      }
+      continue;
+    }
+    result.push(lines[i]);
+    i += 1;
+  }
+  return result.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator state block & awaiting-user tags
+// ---------------------------------------------------------------------------
+
+export type AwaitingUserAction =
+  | "concept_selection"
+  | "validation_decision"
+  | null;
+
+export interface OrchestratorState {
+  currentStep: number | null;
+  currentLesson: string | null;
+  currentGroup: string | null;
+  totalGroups: number | null;
+  processedGroups: string[];
+  pendingGroups: string[];
+  awaitingUser: AwaitingUserAction;
+  accumulatedGuidance: string[];
+}
+
+const STATE_BLOCK_REGEX = /```state\s*\n([\s\S]*?)\n```/;
+const AWAITING_USER_REGEX = /\[AWAITING_USER:(concept_selection|validation_decision)\]/;
+
+export function parseOrchestratorState(
+  text: string
+): OrchestratorState | null {
+  const match = text.match(STATE_BLOCK_REGEX);
+  if (!match) return null;
+  try {
+    const raw = JSON.parse(match[1]) as Partial<OrchestratorState>;
+    return {
+      currentStep: typeof raw.currentStep === "number" ? raw.currentStep : null,
+      currentLesson:
+        typeof raw.currentLesson === "string" ? raw.currentLesson : null,
+      currentGroup:
+        typeof raw.currentGroup === "string" ? raw.currentGroup : null,
+      totalGroups:
+        typeof raw.totalGroups === "number" ? raw.totalGroups : null,
+      processedGroups: Array.isArray(raw.processedGroups)
+        ? raw.processedGroups.filter((x): x is string => typeof x === "string")
+        : [],
+      pendingGroups: Array.isArray(raw.pendingGroups)
+        ? raw.pendingGroups.filter((x): x is string => typeof x === "string")
+        : [],
+      awaitingUser:
+        raw.awaitingUser === "concept_selection" ||
+        raw.awaitingUser === "validation_decision"
+          ? raw.awaitingUser
+          : null,
+      accumulatedGuidance: Array.isArray(raw.accumulatedGuidance)
+        ? raw.accumulatedGuidance.filter(
+            (x): x is string => typeof x === "string"
+          )
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseAwaitingUser(text: string): AwaitingUserAction {
+  const match = text.match(AWAITING_USER_REGEX);
+  if (!match) return null;
+  return match[1] as AwaitingUserAction;
+}
+
+/** Strip state fence and awaiting-user tag so they don't show in the bubble. */
+export function stripOrchestratorMeta(text: string): string {
+  return text
+    .replace(STATE_BLOCK_REGEX, "")
+    .replace(AWAITING_USER_REGEX, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function getAwaitingUserLabel(action: AwaitingUserAction): string {
+  switch (action) {
+    case "concept_selection":
+      return "等待你挑选 1 个包装概念（输入编号 1-5）";
+    case "validation_decision":
+      return "等待你决定验证意见处理方式（A 全部采纳 / B 部分采纳 / C 直接通过）";
+    default:
+      return "";
+  }
+}

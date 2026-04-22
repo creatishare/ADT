@@ -13,6 +13,9 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    extraHTTPHeaders: {
+      "x-chat-test-mode": "1",
+    },
   },
   webServer: {
     command: "npm run dev",

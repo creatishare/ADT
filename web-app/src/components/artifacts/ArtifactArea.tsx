@@ -5,8 +5,6 @@ import { useArtifactStore } from "@/store/useArtifactStore";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import "highlight.js/styles/github.css";
 import {
   formatTimestamp,
   getArtifactCategory,
@@ -15,6 +13,7 @@ import {
   getArtifactSummary,
   getArtifactTypeLabel,
   getParsedContent,
+  normalizeMarkdown,
   parsePromptArtifact,
   parseValidationReport,
 } from "@/lib/chat/artifactParser";
@@ -39,7 +38,7 @@ export function ArtifactArea({ className }: { className?: string }) {
     sortedArtifacts.find((a) => a.id === activeArtifactId) ?? sortedArtifacts[0];
 
   const activeContent = activeArtifact
-    ? getParsedContent(activeArtifact.content)
+    ? normalizeMarkdown(getParsedContent(activeArtifact.content))
     : "";
   const metrics = getArtifactMetrics(activeContent);
   const category = activeArtifact ? getArtifactCategory(activeArtifact.title) : "";
@@ -55,7 +54,7 @@ export function ArtifactArea({ className }: { className?: string }) {
   const renderContent = () => {
     if (!activeArtifact) return null;
 
-    const content = getParsedContent(activeArtifact.content);
+    const content = normalizeMarkdown(getParsedContent(activeArtifact.content));
 
     if (activeArtifact.type === "image") {
       return (
@@ -88,11 +87,23 @@ export function ArtifactArea({ className }: { className?: string }) {
     return (
       <div
         data-testid={artifactTestIds.content}
-        className="prose prose-blue max-w-none dark:prose-invert prose-headings:font-semibold prose-a:text-blue-600"
+        className={cn(
+          "prose prose-blue max-w-none prose-headings:font-semibold prose-a:text-blue-600",
+          // Table styling — overrides prose defaults for better legibility
+          "prose-table:my-4 prose-table:w-full prose-table:border-collapse prose-table:overflow-hidden prose-table:rounded-lg prose-table:border prose-table:border-gray-200",
+          "prose-thead:bg-gray-50",
+          "prose-th:border prose-th:border-gray-200 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:text-sm prose-th:font-semibold prose-th:text-gray-700",
+          "prose-td:border prose-td:border-gray-200 prose-td:px-3 prose-td:py-2 prose-td:text-sm prose-td:text-gray-700 prose-td:align-top",
+          // Code/pre tweaks
+          "prose-pre:bg-gray-950 prose-pre:text-gray-100",
+          "prose-code:rounded prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:font-medium prose-code:text-rose-600 prose-code:before:content-none prose-code:after:content-none"
+        )}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-          {content}
-        </ReactMarkdown>
+        <div className="overflow-x-auto">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {content}
+          </ReactMarkdown>
+        </div>
       </div>
     );
   };
