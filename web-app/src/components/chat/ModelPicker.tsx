@@ -25,16 +25,15 @@ export function ModelPicker({ className }: { className?: string }) {
     <div
       data-testid={pickerTestIds.root}
       className={cn(
-        "relative inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 shadow-sm transition-colors hover:border-gray-300",
+        "relative inline-flex items-center gap-2 rounded-full bg-[var(--surface-ground)] px-3 py-1.5 text-xs text-[var(--fg-primary)] transition-colors hover:bg-[var(--accent-soft)]",
         className
       )}
     >
-      <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-      <div className="flex flex-col leading-tight">
-        <span className="font-medium text-gray-900">{activeMeta.label}</span>
-        <span className="text-[10px] text-gray-400">{activeMeta.hint}</span>
-      </div>
-      <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--success)]" />
+      <span className="font-mono text-[11px] font-medium text-[var(--fg-primary)]">
+        {activeMeta.label}
+      </span>
+      <ChevronDown className="h-3 w-3 text-[var(--fg-muted)]" />
       <select
         data-testid={pickerTestIds.select}
         value={modelId}

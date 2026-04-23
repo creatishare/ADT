@@ -17,7 +17,13 @@ export type ArtifactStatus =
   | "已通过"
   | "可用于出图"
   | "待筛选"
+  | "已选定"
   | "已生成";
+
+export interface ArtifactStatusContext {
+  /** True if this concept artifact has been selected (a downstream artifact with the same courseCode exists). */
+  conceptSelected?: boolean;
+}
 
 export interface ArtifactMetrics {
   lines: number;
@@ -65,7 +71,8 @@ export function getArtifactCategory(title: string): ArtifactCategory {
 
 export function getArtifactStatus(
   title: string,
-  content: string
+  content: string,
+  context?: ArtifactStatusContext
 ): ArtifactStatus {
   if (title.includes("验证")) {
     if (content.includes("不通过") || content.includes("需修改"))
@@ -73,7 +80,9 @@ export function getArtifactStatus(
     if (content.includes("通过")) return "已通过";
   }
   if (title.includes("即梦") || title.includes("提示词")) return "可用于出图";
-  if (title.includes("概念")) return "待筛选";
+  if (title.includes("概念")) {
+    return context?.conceptSelected ? "已选定" : "待筛选";
+  }
   return "已生成";
 }
 

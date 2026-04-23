@@ -4,53 +4,33 @@ import { useState } from "react";
 import { ChatArea } from "@/components/chat/ChatArea";
 import { ArtifactArea } from "@/components/artifacts/ArtifactArea";
 import { SetupSidebar } from "@/components/setup/SetupSidebar";
+import { TopBar } from "@/components/workspace/TopBar";
 import { useArtifactStore } from "@/store/useArtifactStore";
 
-type MobileTab = "chat" | "artifacts";
+type ViewMode = "split" | "chat" | "artifacts";
 
 export default function Home() {
-  const [mobileTab, setMobileTab] = useState<MobileTab>("chat");
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
   const { artifacts } = useArtifactStore();
 
-  return (
-    <main className="h-screen w-full bg-white overflow-hidden text-gray-900 flex flex-col">
-      {/* Mobile tab bar – visible only below md */}
-      <div className="md:hidden flex border-b border-gray-200 bg-white shrink-0">
-        <button
-          type="button"
-          onClick={() => setMobileTab("chat")}
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors border-b-2 ${
-            mobileTab === "chat"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-gray-500"
-          }`}
-        >
-          对话
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileTab("artifacts")}
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors border-b-2 ${
-            mobileTab === "artifacts"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-gray-500"
-          }`}
-        >
-          设计文档
-          {artifacts.length > 0 && (
-            <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
-              {artifacts.length}
-            </span>
-          )}
-        </button>
-      </div>
+  const handleTabClick = (tab: "chat" | "artifacts") => {
+    setViewMode((prev) => (prev === tab ? "split" : tab));
+  };
 
-      {/* Main grid */}
-      <div className="flex-1 min-h-0 grid grid-rows-1 grid-cols-1 md:grid-cols-[1fr_1fr]">
-        {/* Left Pane: SetupSidebar + ChatArea */}
+  return (
+    <main className="h-screen w-full bg-[var(--surface-ground)] overflow-hidden text-[var(--fg-primary)] flex flex-col">
+      <TopBar
+        viewMode={viewMode}
+        onTabClick={handleTabClick}
+        artifactCount={artifacts.length}
+      />
+
+      {/* Bento body — tiles with gap revealing ground */}
+      <div className="flex-1 min-h-0 flex gap-3 p-3 md:gap-4 md:p-4 md:pt-3">
+        {/* Left pane: Setup + Chat tile */}
         <section
-          className={`h-full flex border-r border-gray-200 shadow-sm z-10 relative ${
-            mobileTab === "artifacts" ? "hidden md:flex" : "flex"
+          className={`h-full min-w-0 flex-1 ${
+            viewMode === "artifacts" ? "hidden" : "flex"
           }`}
         >
           <SetupSidebar />
@@ -59,11 +39,11 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Right Pane: Artifact Area */}
+        {/* Right pane: Artifact tile */}
         <section
-          className={`h-full relative bg-gray-50/30 ${
-            mobileTab === "chat" ? "hidden md:block" : "block"
-          }`}
+          className={`h-full min-w-0 flex-1 ${
+            viewMode === "artifacts" ? "block" : "hidden"
+          } ${viewMode === "chat" ? "md:hidden" : "md:block"}`}
         >
           <ArtifactArea />
         </section>
