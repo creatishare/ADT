@@ -1,5 +1,5 @@
-# Non-app planning & workspace files
-workspace/
+# Non-app planning & workspace files (root only)
+/workspace/
 
 # Claude Code config & memory
 .claude/
