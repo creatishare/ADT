@@ -2,6 +2,7 @@ import { stepCountIs, streamText, generateText, generateObject, convertToModelMe
 import type { FinishReason, StepResult } from "ai";
 import { ORCHESTRATOR_SYSTEM_PROMPT } from "@/lib/agents/prompts";
 import {
+  MAX_MEMORY_ITEMS,
   MAX_RECENT_MESSAGES,
   MemorySummarySchema,
   buildLayeredMemoryContext,
@@ -259,15 +260,35 @@ async function buildMemoryContext(
   const transcript = buildTranscript(messages);
   if (!transcript) return "";
 
-  const { object } = await generateObject({
-    model,
-    schema: MemorySummarySchema,
-    system:
-      "你是多智能体工作流的记忆提取器。你的职责是从完整历史中提取真正需要长期保留的用户约束、当前流程状态与最近已完成工具。不要复述闲聊，不要编造。",
-    prompt: `请从下面完整历史中提取结构化记忆。\n\n输出要求：\n1. userConstraints 只保留用户明确要求长期遵守的偏好、禁忌、风格和硬规则。\n2. workflowState 只保留已经确认的流程状态、人工决策、当前推进阶段。\n3. recentTools 只保留最近已完成且对后续有依赖关系的工具。\n\n完整历史：\n${transcript}`,
-  });
+  // Use `output: "no-schema"` so the underlying provider only sets
+  // `response_format: { type: "json_object" }` (supported by DeepSeek, Kimi,
+  // Doubao, etc.). Passing a Zod `schema` would upgrade it to
+  // `json_schema`, which DeepSeek's Chat Completions API rejects with
+  // "This response_format type is unavailable now" and would crash the
+  // entire POST handler after history exceeds MAX_RECENT_MESSAGES.
+  try {
+    const { object } = await generateObject({
+      model,
+      output: "no-schema",
+      system:
+        "你是多智能体工作流的记忆提取器。你的职责是从完整历史中提取真正需要长期保留的用户约束、当前流程状态与最近已完成工具。不要复述闲聊，不要编造。",
+      prompt: `请从下面完整历史中提取结构化记忆，并以 JSON 对象输出。\n\n输出要求（严格 JSON）：\n{\n  "userConstraints": string[],  // 用户明确要求长期遵守的偏好、禁忌、风格和硬规则，最多 ${MAX_MEMORY_ITEMS} 条\n  "workflowState": string[],    // 已确认的流程状态、人工决策、当前推进阶段，最多 ${MAX_MEMORY_ITEMS} 条\n  "recentTools": string[]       // 最近已完成且对后续有依赖关系的工具，最多 ${MAX_MEMORY_ITEMS} 条\n}\n\n完整历史：\n${transcript}`,
+    });
 
-  return buildLayeredMemoryContext(object);
+    const parsed = MemorySummarySchema.safeParse(object);
+    if (!parsed.success) return "";
+
+    return buildLayeredMemoryContext(parsed.data);
+  } catch (error) {
+    // Memory extraction is an enhancement, not a critical path. If the
+    // provider rejects the request (auth, unsupported format, timeout, etc.)
+    // degrade to an empty memory context rather than failing the whole
+    // orchestrator request.
+    logChatDebug("memory.extraction-failed", {
+      message: getErrorMessage(error),
+    });
+    return "";
+  }
 }
 
 // ---------------------------------------------------------------------------
