@@ -91,7 +91,7 @@ export function getArtifactMetrics(content: string): ArtifactMetrics {
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0).length;
   const sections = (content.match(/^#{1,6}\s/gm) ?? []).length;
-  const tables = (content.match(/^\|.*\|$/gm) ?? []).length;
+  const tables = (content.match(/^\|.+\|$/gm) ?? []).length;
   return { lines, sections, tables };
 }
 

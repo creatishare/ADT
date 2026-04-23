@@ -34,6 +34,19 @@ export function resolveModelId(raw: string | null | undefined): ModelId {
   return match ? (match.id as ModelId) : DEFAULT_MODEL_ID;
 }
 
+/**
+ * Resolve the model id for the memory-extraction sub-call. Honors the
+ * `MEMORY_MODEL_ID` env var when it points at a valid `ModelId`, otherwise
+ * falls back to the supplied primary model id. Only returns a distinct id
+ * when the env value is both known AND different from the primary.
+ */
+export function resolveMemoryModelId(primary: ModelId): ModelId {
+  const raw = process.env.MEMORY_MODEL_ID;
+  if (!raw) return primary;
+  const match = AVAILABLE_MODELS.find((m) => m.id === raw);
+  return match ? (match.id as ModelId) : primary;
+}
+
 /** Create an AI SDK model instance ready to be passed to streamText/generateText. */
 export function createModel(modelId: ModelId) {
   switch (modelId) {
@@ -59,8 +72,7 @@ export function createModel(modelId: ModelId) {
       const provider = createOpenAI({
         apiKey: requireEnv("MOONSHOT_API_KEY", modelId),
         baseURL: process.env.MOONSHOT_BASE_URL || "https://api.moonshot.cn/v1",
-        compatibility: "compatible",
-      } as any);
+      });
       return provider.chat(process.env.MOONSHOT_MODEL || "kimi-k2.5");
     }
 
@@ -68,8 +80,7 @@ export function createModel(modelId: ModelId) {
       const provider = createOpenAI({
         apiKey: requireEnv("DEEPSEEK_API_KEY", modelId),
         baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
-        compatibility: "compatible",
-      } as any);
+      });
       return provider.chat(process.env.DEEPSEEK_MODEL || "deepseek-chat");
     }
 
@@ -79,8 +90,7 @@ export function createModel(modelId: ModelId) {
         baseURL:
           process.env.DOUBAO_BASE_URL ||
           "https://ark.cn-beijing.volces.com/api/v3",
-        compatibility: "compatible",
-      } as any);
+      });
       return provider.chat(process.env.DOUBAO_MODEL || "doubao-seed-2.0-pro");
     }
 

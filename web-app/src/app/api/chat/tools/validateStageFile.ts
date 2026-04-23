@@ -1,7 +1,8 @@
-import { tool, generateText, type LanguageModel } from "ai";
+import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { VALIDATOR_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
+import { runSubAgentText } from "./shared";
 
 export function createValidateStageFileTool(
   subAgentModel: LanguageModel,
@@ -43,7 +44,7 @@ export function createValidateStageFileTool(
       }
       prompt += `请严格按照标准审查以上文档，发现任何"魔法元素"直接一票否决。输出带表格的验证报告和具体修改建议。`;
 
-      const { text } = await generateText({
+      const text = await runSubAgentText({
         model: subAgentModel,
         system: VALIDATOR_PROMPT,
         prompt,

@@ -1,8 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { generateText, type LanguageModel } from "ai";
+import { type LanguageModel } from "ai";
 import { DESIGNER_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
+import { runSubAgentText } from "./shared";
 
 export function createDesignStageFileTool(
   subAgentModel: LanguageModel,
@@ -60,7 +61,7 @@ export function createDesignStageFileTool(
         prompt += `请将以上选中的概念整合成一份完整的"初步策划文档"。包含：关卡编号、效果描述、映射关系（表格形式），以及题组前后剧情衔接。`;
       }
 
-      const { text } = await generateText({
+      const text = await runSubAgentText({
         model: subAgentModel,
         system: DESIGNER_PROMPT,
         prompt,

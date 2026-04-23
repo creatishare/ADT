@@ -1,7 +1,8 @@
-import { tool, generateText, type LanguageModel } from "ai";
+import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { WRITER_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
+import { runSubAgentText } from "./shared";
 
 export function createWriteStageFileTool(
   subAgentModel: LanguageModel,
@@ -43,7 +44,7 @@ export function createWriteStageFileTool(
       }
       prompt += `请将以上内容扩展撰写为正式落地的《关卡设计介绍文档》。包含关卡设计总览表、单个关卡的详细方案（附前后剧情）以及可替换效果类型表。`;
 
-      const { text } = await generateText({
+      const text = await runSubAgentText({
         model: subAgentModel,
         system: WRITER_PROMPT,
         prompt,

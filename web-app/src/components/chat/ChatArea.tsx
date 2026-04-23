@@ -87,19 +87,6 @@ function getToolDisplayName(toolName: string) {
   return toolNameMap[toolName] ?? toolName;
 }
 
-function getToolStatusText(state: ToolLikePart["state"]) {
-  switch (state) {
-    case "output-available":
-      return "已完成";
-    case "output-error":
-      return "执行失败";
-    case "approval-requested":
-      return "等待确认";
-    default:
-      return "运行中";
-  }
-}
-
 const toolIconMap: Record<string, LucideIcon> = {
   designStageFile: Gamepad2,
   writeStageFile: PenLine,

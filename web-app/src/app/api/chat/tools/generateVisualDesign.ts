@@ -1,7 +1,8 @@
-import { tool, generateText, type LanguageModel } from "ai";
+import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { VISUAL_PROMPT } from "@/lib/agents/prompts";
 import type { ToolOutput } from "./types";
+import { runSubAgentText } from "./shared";
 
 export function createGenerateVisualDesignTool(
   subAgentModel: LanguageModel,
@@ -35,7 +36,7 @@ export function createGenerateVisualDesignTool(
       }
       prompt += `请提取视觉需求，并输出符合要求的、精准的英文提示词（需说明 2K, 4:3 设置，同题组去重）。`;
 
-      const { text } = await generateText({
+      const text = await runSubAgentText({
         model: subAgentModel,
         system: VISUAL_PROMPT,
         prompt,

@@ -1,5 +1,5 @@
 import { stepCountIs, streamText, generateText, generateObject, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from "ai";
-import type { FinishReason, StepResult } from "ai";
+import type { FinishReason } from "ai";
 import { ORCHESTRATOR_SYSTEM_PROMPT } from "@/lib/agents/prompts";
 import {
   MAX_MEMORY_ITEMS,
@@ -18,7 +18,12 @@ import {
   createValidateStageFileTool,
   createGenerateVisualDesignTool,
 } from "./tools";
-import { createModel, resolveModelId, MissingApiKeyError } from "@/lib/llm/server";
+import { createModel, resolveModelId, resolveMemoryModelId, MissingApiKeyError } from "@/lib/llm/server";
+import {
+  getMemoryCacheKey,
+  getMemoryCacheEntry,
+  setMemoryCacheEntry,
+} from "@/lib/chat/memoryCache";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -253,12 +258,27 @@ function extractLatestGuidance(messages: RequestMessage[]): string {
 // Memory
 // ---------------------------------------------------------------------------
 
+type MemoryExtractionResult = {
+  context: string;
+  cacheHit: boolean;
+  transcriptLength: number;
+};
+
 async function buildMemoryContext(
   messages: RequestMessage[],
-  model: Parameters<typeof generateText>[0]["model"]
-) {
+  model: Parameters<typeof generateText>[0]["model"],
+  memoryModelId: string
+): Promise<MemoryExtractionResult> {
   const transcript = buildTranscript(messages);
-  if (!transcript) return "";
+  if (!transcript) {
+    return { context: "", cacheHit: false, transcriptLength: 0 };
+  }
+
+  const cacheKey = getMemoryCacheKey(transcript, memoryModelId);
+  const cached = getMemoryCacheEntry(cacheKey);
+  if (cached !== undefined) {
+    return { context: cached, cacheHit: true, transcriptLength: transcript.length };
+  }
 
   // Use `output: "no-schema"` so the underlying provider only sets
   // `response_format: { type: "json_object" }` (supported by DeepSeek, Kimi,
@@ -276,9 +296,13 @@ async function buildMemoryContext(
     });
 
     const parsed = MemorySummarySchema.safeParse(object);
-    if (!parsed.success) return "";
+    if (!parsed.success) {
+      return { context: "", cacheHit: false, transcriptLength: transcript.length };
+    }
 
-    return buildLayeredMemoryContext(parsed.data);
+    const context = buildLayeredMemoryContext(parsed.data);
+    setMemoryCacheEntry(cacheKey, context);
+    return { context, cacheHit: false, transcriptLength: transcript.length };
   } catch (error) {
     // Memory extraction is an enhancement, not a critical path. If the
     // provider rejects the request (auth, unsupported format, timeout, etc.)
@@ -287,7 +311,7 @@ async function buildMemoryContext(
     logChatDebug("memory.extraction-failed", {
       message: getErrorMessage(error),
     });
-    return "";
+    return { context: "", cacheHit: false, transcriptLength: transcript.length };
   }
 }
 
@@ -322,7 +346,14 @@ export async function POST(req: Request) {
     });
   }
 
-  const recentMessages = rawMessages.slice(-MAX_RECENT_MESSAGES);
+  // Filter raw messages to only those normalizeMessages would accept, so the
+  // window seen by streamText matches the one used for memory extraction.
+  // Preserves original UIMessage shape required by convertToModelMessages.
+  const validRawMessages = rawMessages.filter(
+    (m: { role?: unknown }) =>
+      m?.role === "system" || m?.role === "user" || m?.role === "assistant"
+  );
+  const recentMessages = validRawMessages.slice(-MAX_RECENT_MESSAGES);
   const modelMessages = await convertToModelMessages(recentMessages);
 
   const modelId = resolveModelId(req.headers.get(MODEL_ID_HEADER));
@@ -344,10 +375,44 @@ export async function POST(req: Request) {
     });
   }
 
-  const memoryContext =
-    requestMessages.length > MAX_RECENT_MESSAGES
-      ? await buildMemoryContext(requestMessages, subAgentModel)
-      : "";
+  // Memory extraction can be routed to a cheaper model via `MEMORY_MODEL_ID`.
+  // Falls back to the main sub-agent model when the env is unset or the
+  // override model fails to initialize (e.g. missing API key).
+  const memoryModelId = resolveMemoryModelId(modelId);
+  let memoryModel = subAgentModel;
+  let memoryModelIdUsed = modelId;
+  if (memoryModelId !== modelId) {
+    try {
+      memoryModel = createModel(memoryModelId);
+      memoryModelIdUsed = memoryModelId;
+    } catch (error) {
+      if (debugEnabled) {
+        logChatDebug("memory.model-fallback", {
+          requested: memoryModelId,
+          fallback: modelId,
+          message: getErrorMessage(error),
+        });
+      }
+    }
+  }
+
+  let memoryContext = "";
+  if (requestMessages.length > MAX_RECENT_MESSAGES) {
+    const result = await buildMemoryContext(
+      requestMessages,
+      memoryModel,
+      memoryModelIdUsed
+    );
+    memoryContext = result.context;
+    if (debugEnabled) {
+      logChatDebug("memory.extraction", {
+        cacheHit: result.cacheHit,
+        transcriptLength: result.transcriptLength,
+        contextLength: result.context.length,
+        modelId: memoryModelIdUsed,
+      });
+    }
+  }
 
   const fallbackGuidance = extractLatestGuidance(requestMessages);
 
@@ -381,7 +446,7 @@ export async function POST(req: Request) {
       onError: ({ error }) => {
         if (debugEnabled) logChatDebug("stream.error", { message: getErrorMessage(error) });
       },
-      onStepFinish: ({ text, toolCalls, toolResults, finishReason, rawFinishReason, response }: StepResult<any>) => {
+      onStepFinish: ({ text, toolCalls, toolResults, finishReason, rawFinishReason, response }) => {
         if (debugEnabled) {
           logChatDebug("stream.step-finish", {
             textLength: text.length,

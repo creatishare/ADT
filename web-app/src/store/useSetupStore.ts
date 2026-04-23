@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface UploadedDoc {
   name: string;
@@ -18,15 +19,22 @@ interface SetupStore {
   clearInitialPrompt: () => void;
 }
 
-export const useSetupStore = create<SetupStore>((set) => ({
-  isCollapsed: false,
-  worldDoc: null,
-  lessonDoc: null,
-  initialPrompt: null,
-  toggleCollapse: () => set((state) => ({ isCollapsed: !state.isCollapsed })),
-  setWorldDoc: (doc) => set({ worldDoc: doc }),
-  setLessonDoc: (doc) => set({ lessonDoc: doc }),
-  clearDocs: () => set({ worldDoc: null, lessonDoc: null }),
-  setInitialPrompt: (prompt) => set({ initialPrompt: prompt }),
-  clearInitialPrompt: () => set({ initialPrompt: null }),
-}));
+export const useSetupStore = create<SetupStore>()(
+  persist(
+    (set) => ({
+      isCollapsed: false,
+      worldDoc: null,
+      lessonDoc: null,
+      initialPrompt: null,
+      toggleCollapse: () => set((state) => ({ isCollapsed: !state.isCollapsed })),
+      setWorldDoc: (doc) => set({ worldDoc: doc }),
+      setLessonDoc: (doc) => set({ lessonDoc: doc }),
+      clearDocs: () => set({ worldDoc: null, lessonDoc: null }),
+      setInitialPrompt: (prompt) => set({ initialPrompt: prompt }),
+      clearInitialPrompt: () => set({ initialPrompt: null }),
+    }),
+    {
+      name: 'agent-designer-setup',
+    }
+  )
+);
