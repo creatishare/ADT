@@ -22,7 +22,7 @@ describe("memoryCache", () => {
 
   it("produces different keys for different model ids on the same transcript", () => {
     const a = getMemoryCacheKey("transcript", "gemini-3.1");
-    const b = getMemoryCacheKey("transcript", "deepseek-v3.2");
+    const b = getMemoryCacheKey("transcript", "deepseek-v4-pro");
     expect(a).not.toBe(b);
   });
 

@@ -82,25 +82,25 @@ export function createModel(modelId: ModelId) {
       return provider(process.env.GOOGLE_GENERATIVE_AI_MODEL || "gemini-2.5-flash");
     }
 
-    case "gpt-5.2": {
+    case "gpt-5-4": {
       const provider = createOpenAI({
         apiKey: pickKeyFor(modelId),
         baseURL: process.env.OPENAI_BASE_URL,
       });
       // Use Chat Completions API explicitly — Responses API requires
       // previous_response_id chaining which this app does not maintain.
-      return provider.chat(process.env.OPENAI_MODEL || "gpt-5.2");
+      return provider.chat(process.env.OPENAI_MODEL || "gpt-5-4");
     }
 
-    case "kimi-k2.5": {
+    case "kimi-k2.6": {
       const provider = createOpenAI({
         apiKey: pickKeyFor(modelId),
         baseURL: process.env.MOONSHOT_BASE_URL || "https://api.moonshot.cn/v1",
       });
-      return provider.chat(process.env.MOONSHOT_MODEL || "kimi-k2.5");
+      return provider.chat(process.env.MOONSHOT_MODEL || "kimi-k2.6");
     }
 
-    case "deepseek-v3.2": {
+    case "deepseek-v4-pro": {
       const provider = createOpenAI({
         apiKey: pickKeyFor(modelId),
         baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",

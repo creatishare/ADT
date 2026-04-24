@@ -26,21 +26,21 @@ export const AVAILABLE_MODELS = [
     provider: "google",
   },
   {
-    id: "gpt-5.2",
-    label: "GPT 5.2",
+    id: "gpt-5-4",
+    label: "GPT 5-4",
     hint: "OpenAI · 代码与长文",
     provider: "openai",
   },
   {
-    id: "kimi-k2.5",
-    label: "Kimi K2.5",
+    id: "kimi-k2.6",
+    label: "Kimi K2.6",
     hint: "Moonshot · 中文长上下文",
     provider: "moonshot",
   },
   {
-    id: "deepseek-v3.2",
-    label: "DeepSeek V3.2",
-    hint: "DeepSeek · 成本敏感场景",
+    id: "deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    hint: "DeepSeek · 评分次于gemini 3.1pro",
     provider: "deepseek",
   },
   {
