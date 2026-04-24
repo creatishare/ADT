@@ -12,6 +12,10 @@ const selectors = {
   artifactSummaryCard: '[data-testid="artifact-summary-card"]',
   artifactContent: '[data-testid="artifact-content"]',
   artifactTabs: '[data-testid="artifact-tabs"]',
+  sessionSwitcher: '[data-testid="session-switcher"]',
+  sessionSwitcherNew: '[data-testid="session-switcher-new"]',
+  sessionSwitcherList: '[data-testid="session-switcher-list"]',
+  sessionSwitcherItem: '[data-testid="session-switcher-item"]',
 };
 
 // ---------------------------------------------------------------------------
@@ -210,5 +214,67 @@ test.describe("artifact persistence", () => {
     await expect(page.locator(selectors.artifactContent)).toContainText(
       "方案 A"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-session conversation persistence
+// ---------------------------------------------------------------------------
+
+test.describe("conversation persistence and sessions", () => {
+  test("chat messages survive mid-session reload", async ({ page }) => {
+    await page.goto("/");
+
+    await page
+      .locator(selectors.chatInput)
+      .fill("刷新前第一次请求 [test-scenario:success]");
+    await page.locator(selectors.chatSendButton).click();
+    await expect(page.locator(selectors.chatLoadingState)).toBeHidden();
+    await expect(page.locator(selectors.chatMessageList)).toContainText(
+      "刷新前第一次请求"
+    );
+
+    await page.reload();
+
+    await expect(page.locator(selectors.chatMessageList)).toContainText(
+      "刷新前第一次请求"
+    );
+    await expect(page.locator(selectors.artifactActiveTitle)).toBeVisible();
+  });
+
+  test("新建 clears messages and artifacts but preserves previous session", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // Original session with content
+    await page
+      .locator(selectors.chatInput)
+      .fill("原会话工件 [test-scenario:success]");
+    await page.locator(selectors.chatSendButton).click();
+    await expect(page.locator(selectors.artifactActiveTitle)).toBeVisible();
+
+    // Create a new session via the switcher
+    await expect(page.locator(selectors.sessionSwitcher)).toBeVisible();
+    await page.locator(selectors.sessionSwitcherNew).click();
+
+    // New session should be empty
+    await expect(page.locator(selectors.chatEmptyState)).toBeVisible();
+    await expect(page.locator(selectors.artifactEmptyState)).toBeVisible();
+
+    // We should now see two sessions in the list
+    await expect(
+      page.locator(selectors.sessionSwitcherItem)
+    ).toHaveCount(2);
+
+    // Switching back to the first session restores messages + artifact
+    await page
+      .locator(selectors.sessionSwitcherItem)
+      .nth(1)
+      .click();
+    await expect(page.locator(selectors.chatMessageList)).toContainText(
+      "原会话工件"
+    );
+    await expect(page.locator(selectors.artifactActiveTitle)).toBeVisible();
   });
 });

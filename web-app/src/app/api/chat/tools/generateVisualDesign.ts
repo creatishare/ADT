@@ -1,11 +1,13 @@
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { VISUAL_PROMPT } from "@/lib/agents/prompts";
+import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import { runSubAgentText } from "./shared";
 
 export function createGenerateVisualDesignTool(
   subAgentModel: LanguageModel,
+  modelId: ModelId,
   fallbackGuidance: string = ""
 ) {
   return tool({
@@ -38,6 +40,7 @@ export function createGenerateVisualDesignTool(
 
       const text = await runSubAgentText({
         model: subAgentModel,
+        modelId,
         system: VISUAL_PROMPT,
         prompt,
       });

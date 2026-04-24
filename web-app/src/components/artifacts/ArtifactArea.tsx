@@ -1,8 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { useArtifactStore } from "@/store/useArtifactStore";
+import { useArtifactStore, type Artifact } from "@/store/useArtifactStore";
+import { useConversationStore } from "@/store/useConversationStore";
 import { cn } from "@/lib/utils";
+
+const EMPTY_ARTIFACTS: readonly Artifact[] = Object.freeze([]);
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FileText, Image as ImageIcon, Code2, FolderOpen } from "lucide-react";
@@ -30,7 +33,18 @@ const artifactTestIds = {
 };
 
 export function ArtifactArea({ className }: { className?: string }) {
-  const { artifacts, activeArtifactId, setActiveArtifact } = useArtifactStore();
+  const activeSessionId = useConversationStore((s) => s.activeSessionId);
+  const artifacts = useArtifactStore((s) =>
+    activeSessionId
+      ? s.bySession[activeSessionId] ?? (EMPTY_ARTIFACTS as Artifact[])
+      : (EMPTY_ARTIFACTS as Artifact[])
+  );
+  const activeArtifactId = useArtifactStore((s) =>
+    activeSessionId
+      ? s.activeArtifactIdBySession[activeSessionId] ?? null
+      : null
+  );
+  const setActiveArtifact = useArtifactStore((s) => s.setActiveArtifact);
   const sortedArtifacts = useMemo(
     () => [...artifacts].sort((a, b) => b.timestamp - a.timestamp),
     [artifacts]
@@ -169,7 +183,10 @@ export function ArtifactArea({ className }: { className?: string }) {
           return (
             <button
               key={artifact.id}
-              onClick={() => setActiveArtifact(artifact.id)}
+              onClick={() =>
+                activeSessionId &&
+                setActiveArtifact(activeSessionId, artifact.id)
+              }
               className={cn(
                 "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
                 isActive

@@ -9,23 +9,47 @@
  *
  * Model IDs sent to provider APIs can be overridden via env vars (e.g.
  * `GOOGLE_GENERATIVE_AI_MODEL`, `OPENAI_MODEL`, etc.) without touching code.
+ *
+ * Each `createModel()` call picks the next API key from the per-provider
+ * KeyPool (round-robin). This means two concurrent requests hitting the same
+ * `modelId` can talk to different keys, multiplying effective RPM/TPM
+ * capacity across the pool.
  */
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, type ModelId } from "./providers";
+import {
+  AVAILABLE_MODELS,
+  DEFAULT_MODEL_ID,
+  getProviderForModelId,
+  type ModelId,
+  type ProviderId,
+} from "./providers";
+import { getEnvNames, pickKey } from "./keyPool";
 
 export class MissingApiKeyError extends Error {
-  constructor(public readonly envVar: string, public readonly modelId: ModelId) {
-    super(`Missing API key for model "${modelId}". Set ${envVar} in .env.local`);
+  public readonly envVar: string;
+  constructor(
+    public readonly modelId: ModelId,
+    public readonly provider: ProviderId
+  ) {
+    const { plural, singular } = getEnvNames(provider);
+    super(
+      `Missing API key for model "${modelId}" (provider "${provider}"). ` +
+        `Set ${plural} (comma-separated) or ${singular} in .env.local`
+    );
     this.name = "MissingApiKeyError";
+    // Expose the plural name as the primary env hint — singular still works
+    // as fallback but the user-facing guidance should steer toward the pool.
+    this.envVar = plural;
   }
 }
 
-function requireEnv(envVar: string, modelId: ModelId) {
-  const value = process.env[envVar];
-  if (!value) throw new MissingApiKeyError(envVar, modelId);
-  return value;
+function pickKeyFor(modelId: ModelId): string {
+  const provider = getProviderForModelId(modelId);
+  const key = pickKey(provider);
+  if (!key) throw new MissingApiKeyError(modelId, provider);
+  return key;
 }
 
 export function resolveModelId(raw: string | null | undefined): ModelId {
@@ -52,7 +76,7 @@ export function createModel(modelId: ModelId) {
   switch (modelId) {
     case "gemini-3.1": {
       const provider = createGoogleGenerativeAI({
-        apiKey: requireEnv("GOOGLE_GENERATIVE_AI_API_KEY", modelId),
+        apiKey: pickKeyFor(modelId),
         baseURL: process.env.GOOGLE_GENERATIVE_AI_BASE_URL,
       });
       return provider(process.env.GOOGLE_GENERATIVE_AI_MODEL || "gemini-2.5-flash");
@@ -60,7 +84,7 @@ export function createModel(modelId: ModelId) {
 
     case "gpt-5.2": {
       const provider = createOpenAI({
-        apiKey: requireEnv("OPENAI_API_KEY", modelId),
+        apiKey: pickKeyFor(modelId),
         baseURL: process.env.OPENAI_BASE_URL,
       });
       // Use Chat Completions API explicitly — Responses API requires
@@ -70,7 +94,7 @@ export function createModel(modelId: ModelId) {
 
     case "kimi-k2.5": {
       const provider = createOpenAI({
-        apiKey: requireEnv("MOONSHOT_API_KEY", modelId),
+        apiKey: pickKeyFor(modelId),
         baseURL: process.env.MOONSHOT_BASE_URL || "https://api.moonshot.cn/v1",
       });
       return provider.chat(process.env.MOONSHOT_MODEL || "kimi-k2.5");
@@ -78,7 +102,7 @@ export function createModel(modelId: ModelId) {
 
     case "deepseek-v3.2": {
       const provider = createOpenAI({
-        apiKey: requireEnv("DEEPSEEK_API_KEY", modelId),
+        apiKey: pickKeyFor(modelId),
         baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
       });
       return provider.chat(process.env.DEEPSEEK_MODEL || "deepseek-chat");
@@ -86,7 +110,7 @@ export function createModel(modelId: ModelId) {
 
     case "doubao-seed-2.0-pro": {
       const provider = createOpenAI({
-        apiKey: requireEnv("DOUBAO_API_KEY", modelId),
+        apiKey: pickKeyFor(modelId),
         baseURL:
           process.env.DOUBAO_BASE_URL ||
           "https://ark.cn-beijing.volces.com/api/v3",

@@ -4,10 +4,11 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isTextUIPart, type UIMessage } from "ai";
 import { getToolArtifact } from "../../lib/chat/toolArtifact";
 import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useArtifactStore } from "@/store/useArtifactStore";
 import { useSetupStore } from "@/store/useSetupStore";
 import { useModelStore } from "@/store/useModelStore";
+import { useConversationStore } from "@/store/useConversationStore";
 import {
   ArrowUp,
   CheckCircle2,
@@ -143,10 +144,12 @@ function ToolStatusPill({ state }: { state: ToolLikePart["state"] }) {
   );
 }
 
-export function ChatArea({ className }: { className?: string }) {
-  // Transport is created once. It reads the latest model ID at send time via
-  // `useModelStore.getState()` so switching the picker does not require
-  // re-creating the transport.
+interface ChatSessionProps {
+  sessionId: string;
+  className?: string;
+}
+
+function ChatSession({ sessionId, className }: ChatSessionProps) {
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -157,15 +160,24 @@ export function ChatArea({ className }: { className?: string }) {
       }),
     []
   );
+
+  const initialMessages = useMemo<UIMessage[]>(
+    () =>
+      useConversationStore.getState().sessions[sessionId]?.messages ?? [],
+    [sessionId]
+  );
+
   const { messages, sendMessage, regenerate, status, error, clearError } = useChat({
     transport,
+    messages: initialMessages,
   });
   const [input, setInput] = useState("");
   const isLoading = status === "submitted" || status === "streaming";
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addArtifact, setActiveArtifact } = useArtifactStore();
+  const addArtifact = useArtifactStore((s) => s.addArtifact);
+  const setActiveArtifact = useArtifactStore((s) => s.setActiveArtifact);
   const { initialPrompt, clearInitialPrompt } = useSetupStore();
 
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null);
@@ -198,7 +210,7 @@ export function ChatArea({ className }: { className?: string }) {
       const artifact = getToolArtifact(toolPart.output);
       if (!artifact) return;
 
-      addArtifact({
+      addArtifact(sessionId, {
         id: toolPart.toolCallId,
         title: artifact.title,
         type: artifact.type,
@@ -206,7 +218,11 @@ export function ChatArea({ className }: { className?: string }) {
         courseCode: artifact.courseCode,
       });
     });
-  }, [toolParts, addArtifact]);
+  }, [toolParts, addArtifact, sessionId]);
+
+  useEffect(() => {
+    useConversationStore.getState().setMessages(sessionId, messages);
+  }, [sessionId, messages]);
 
   useEffect(() => {
     if (!initialPrompt || messages.length > 0 || isLoading) return;
@@ -431,7 +447,7 @@ export function ChatArea({ className }: { className?: string }) {
                             {artifact && (
                               <button
                                 type="button"
-                                onClick={() => setActiveArtifact(toolCallId)}
+                                onClick={() => setActiveArtifact(sessionId, toolCallId)}
                                 className="flex items-center justify-between gap-3 rounded-xl bg-[var(--surface-ground)] px-3 py-2 text-left text-[11px] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--accent-soft)]"
                               >
                                 <span className="truncate">
@@ -623,5 +639,84 @@ export function ChatArea({ className }: { className?: string }) {
         </form>
       </div>
     </div>
+  );
+}
+
+function subscribeHydration(callback: () => void): () => void {
+  return useConversationStore.persist.onFinishHydration(callback);
+}
+
+function getHydrationSnapshot(): boolean {
+  return useConversationStore.persist.hasHydrated();
+}
+
+function getServerHydrationSnapshot(): boolean {
+  return false;
+}
+
+function useConversationHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeHydration,
+    getHydrationSnapshot,
+    getServerHydrationSnapshot
+  );
+}
+
+function ChatAreaSkeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "flex h-full items-center justify-center rounded-2xl bg-[var(--surface-tile)]",
+        className
+      )}
+    >
+      <div className="flex items-center gap-2 text-sm text-[var(--fg-muted)]">
+        <span className="flex items-center gap-0.5" aria-hidden="true">
+          <span
+            className="thinking-dot h-1.5 w-1.5 rounded-full bg-[var(--fg-muted)]"
+            style={{ animationDelay: "0ms" }}
+          />
+          <span
+            className="thinking-dot h-1.5 w-1.5 rounded-full bg-[var(--fg-muted)]"
+            style={{ animationDelay: "160ms" }}
+          />
+          <span
+            className="thinking-dot h-1.5 w-1.5 rounded-full bg-[var(--fg-muted)]"
+            style={{ animationDelay: "320ms" }}
+          />
+        </span>
+        正在加载会话…
+      </div>
+    </div>
+  );
+}
+
+export function ChatArea({ className }: { className?: string }) {
+  const hydrated = useConversationHydrated();
+  const activeSessionId = useConversationStore((s) => s.activeSessionId);
+  const createSession = useConversationStore((s) => s.createSession);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (activeSessionId) return;
+    const { worldDoc, lessonDoc } = useSetupStore.getState();
+    createSession({
+      docsSnapshot: {
+        worldDocName: worldDoc?.name,
+        lessonDocName: lessonDoc?.name,
+      },
+    });
+  }, [hydrated, activeSessionId, createSession]);
+
+  if (!hydrated || !activeSessionId) {
+    return <ChatAreaSkeleton className={className} />;
+  }
+
+  return (
+    <ChatSession
+      key={activeSessionId}
+      sessionId={activeSessionId}
+      className={className}
+    />
   );
 }

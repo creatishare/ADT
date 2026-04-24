@@ -65,3 +65,9 @@ export function isKnownModelId(value: unknown): value is ModelId {
 export function getModelMeta(id: string): ModelMeta | undefined {
   return AVAILABLE_MODELS.find((m) => m.id === id);
 }
+
+export function getProviderForModelId(id: ModelId): ProviderId {
+  const meta = AVAILABLE_MODELS.find((m) => m.id === id);
+  if (!meta) throw new Error(`Unknown ModelId: ${id}`);
+  return meta.provider;
+}

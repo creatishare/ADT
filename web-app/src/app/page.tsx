@@ -6,12 +6,16 @@ import { ArtifactArea } from "@/components/artifacts/ArtifactArea";
 import { SetupSidebar } from "@/components/setup/SetupSidebar";
 import { TopBar } from "@/components/workspace/TopBar";
 import { useArtifactStore } from "@/store/useArtifactStore";
+import { useConversationStore } from "@/store/useConversationStore";
 
 type ViewMode = "split" | "chat" | "artifacts";
 
 export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>("split");
-  const { artifacts } = useArtifactStore();
+  const activeSessionId = useConversationStore((s) => s.activeSessionId);
+  const artifactCount = useArtifactStore((s) =>
+    activeSessionId ? (s.bySession[activeSessionId]?.length ?? 0) : 0
+  );
 
   const handleTabClick = (tab: "chat" | "artifacts") => {
     setViewMode((prev) => (prev === tab ? "split" : tab));
@@ -22,7 +26,7 @@ export default function Home() {
       <TopBar
         viewMode={viewMode}
         onTabClick={handleTabClick}
-        artifactCount={artifacts.length}
+        artifactCount={artifactCount}
       />
 
       {/* Bento body — tiles with gap revealing ground */}

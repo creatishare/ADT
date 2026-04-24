@@ -19,6 +19,8 @@ import {
   createGenerateVisualDesignTool,
 } from "./tools";
 import { createModel, resolveModelId, resolveMemoryModelId, MissingApiKeyError } from "@/lib/llm/server";
+import { getGate } from "@/lib/llm/gate";
+import { getProviderForModelId } from "@/lib/llm/providers";
 import {
   getMemoryCacheKey,
   getMemoryCacheEntry,
@@ -267,7 +269,7 @@ type MemoryExtractionResult = {
 async function buildMemoryContext(
   messages: RequestMessage[],
   model: Parameters<typeof generateText>[0]["model"],
-  memoryModelId: string
+  memoryModelId: import("@/lib/llm/providers").ModelId
 ): Promise<MemoryExtractionResult> {
   const transcript = buildTranscript(messages);
   if (!transcript) {
@@ -287,13 +289,17 @@ async function buildMemoryContext(
   // "This response_format type is unavailable now" and would crash the
   // entire POST handler after history exceeds MAX_RECENT_MESSAGES.
   try {
-    const { object } = await generateObject({
-      model,
-      output: "no-schema",
-      system:
-        "你是多智能体工作流的记忆提取器。你的职责是从完整历史中提取真正需要长期保留的用户约束、当前流程状态与最近已完成工具。不要复述闲聊，不要编造。",
-      prompt: `请从下面完整历史中提取结构化记忆，并以 JSON 对象输出。\n\n输出要求（严格 JSON）：\n{\n  "userConstraints": string[],  // 用户明确要求长期遵守的偏好、禁忌、风格和硬规则，最多 ${MAX_MEMORY_ITEMS} 条\n  "workflowState": string[],    // 已确认的流程状态、人工决策、当前推进阶段，最多 ${MAX_MEMORY_ITEMS} 条\n  "recentTools": string[]       // 最近已完成且对后续有依赖关系的工具，最多 ${MAX_MEMORY_ITEMS} 条\n}\n\n完整历史：\n${transcript}`,
-    });
+    const memoryGate = getGate(getProviderForModelId(memoryModelId));
+    const { object } = await memoryGate.run(() =>
+      generateObject({
+        model,
+        output: "no-schema",
+        maxRetries: 3,
+        system:
+          "你是多智能体工作流的记忆提取器。你的职责是从完整历史中提取真正需要长期保留的用户约束、当前流程状态与最近已完成工具。不要复述闲聊，不要编造。",
+        prompt: `请从下面完整历史中提取结构化记忆，并以 JSON 对象输出。\n\n输出要求（严格 JSON）：\n{\n  "userConstraints": string[],  // 用户明确要求长期遵守的偏好、禁忌、风格和硬规则，最多 ${MAX_MEMORY_ITEMS} 条\n  "workflowState": string[],    // 已确认的流程状态、人工决策、当前推进阶段，最多 ${MAX_MEMORY_ITEMS} 条\n  "recentTools": string[]       // 最近已完成且对后续有依赖关系的工具，最多 ${MAX_MEMORY_ITEMS} 条\n}\n\n完整历史：\n${transcript}`,
+      })
+    );
 
     const parsed = MemorySummarySchema.safeParse(object);
     if (!parsed.success) {
@@ -430,6 +436,29 @@ export async function POST(req: Request) {
     });
   }
 
+  // Orchestrator concurrency gate — holds a slot for the *entire* stream
+  // lifecycle (not just the initial call). Released via onFinish/onError or
+  // the safety timeout below. `releaseOnce` guarantees at-most-one release.
+  const orchestratorGate = getGate(getProviderForModelId(modelId));
+  const gateRelease = await orchestratorGate.acquire();
+  let gateReleased = false;
+  const releaseOnce = () => {
+    if (gateReleased) return;
+    gateReleased = true;
+    gateRelease();
+  };
+  // Safety net — if the stream never fires onFinish/onError (e.g. client
+  // disconnect with no callback), force release after maxDuration + buffer
+  // so the slot does not leak for the lifetime of this warm process.
+  const gateSafetyTimer = setTimeout(
+    releaseOnce,
+    (maxDuration + 30) * 1000
+  );
+  const releaseGate = () => {
+    clearTimeout(gateSafetyTimer);
+    releaseOnce();
+  };
+
   let result;
 
   try {
@@ -440,10 +469,15 @@ export async function POST(req: Request) {
         : ORCHESTRATOR_SYSTEM_PROMPT,
       messages: modelMessages,
       stopWhen: stepCountIs(5),
+      // Retries with exponential backoff — papers over transient 429/503
+      // bursts under multi-user concurrency. With the gate above already
+      // rate-limiting, retries only fire for *upstream* provider blips.
+      maxRetries: 4,
       onChunk: ({ chunk }) => {
         if (debugEnabled) logChatDebug("stream.chunk", { type: getChunkType(chunk) });
       },
       onError: ({ error }) => {
+        releaseGate();
         if (debugEnabled) logChatDebug("stream.error", { message: getErrorMessage(error) });
       },
       onStepFinish: ({ text, toolCalls, toolResults, finishReason, rawFinishReason, response }) => {
@@ -459,6 +493,7 @@ export async function POST(req: Request) {
         }
       },
       onFinish: ({ text, finishReason, totalUsage, steps }) => {
+        releaseGate();
         if (debugEnabled) {
           logChatDebug("stream.finish", {
             textLength: text.length,
@@ -469,13 +504,14 @@ export async function POST(req: Request) {
         }
       },
       tools: {
-        designStageFile: createDesignStageFileTool(subAgentModel, fallbackGuidance),
-        writeStageFile: createWriteStageFileTool(subAgentModel, fallbackGuidance),
-        validateStageFile: createValidateStageFileTool(subAgentModel, fallbackGuidance),
-        generateVisualDesign: createGenerateVisualDesignTool(subAgentModel, fallbackGuidance),
+        designStageFile: createDesignStageFileTool(subAgentModel, modelId, fallbackGuidance),
+        writeStageFile: createWriteStageFileTool(subAgentModel, modelId, fallbackGuidance),
+        validateStageFile: createValidateStageFileTool(subAgentModel, modelId, fallbackGuidance),
+        generateVisualDesign: createGenerateVisualDesignTool(subAgentModel, modelId, fallbackGuidance),
       },
     });
   } catch (error) {
+    releaseGate();
     if (debugEnabled) logChatDebug("stream.setup-error", { message: getErrorMessage(error) });
     return createUIMessageStreamResponse({
       stream: createEmptyResponseFallbackStream(getProviderFailureMessage(error)),
@@ -497,6 +533,7 @@ export async function POST(req: Request) {
 
     return result.toUIMessageStreamResponse();
   } catch (error) {
+    releaseGate();
     if (debugEnabled) logChatDebug("stream.response-error", { message: getErrorMessage(error) });
     return createUIMessageStreamResponse({
       stream: createEmptyResponseFallbackStream(getProviderFailureMessage(error)),

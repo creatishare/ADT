@@ -2,7 +2,11 @@
 
 import { useRef, useState } from "react";
 import { useSetupStore } from "@/store/useSetupStore";
-import { useArtifactStore } from "@/store/useArtifactStore";
+import { useArtifactStore, type Artifact } from "@/store/useArtifactStore";
+import { useConversationStore } from "@/store/useConversationStore";
+import { SessionSwitcher } from "@/components/workspace/SessionSwitcher";
+
+const EMPTY_ARTIFACTS: readonly Artifact[] = Object.freeze([]);
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -105,7 +109,13 @@ export function SetupSidebar() {
     setLessonDoc,
     setInitialPrompt,
   } = useSetupStore();
-  const { artifacts, deleteArtifact } = useArtifactStore();
+  const activeSessionId = useConversationStore((s) => s.activeSessionId);
+  const artifacts = useArtifactStore((s) =>
+    activeSessionId
+      ? s.bySession[activeSessionId] ?? (EMPTY_ARTIFACTS as Artifact[])
+      : (EMPTY_ARTIFACTS as Artifact[])
+  );
+  const deleteArtifact = useArtifactStore((s) => s.deleteArtifact);
   const worldInputRef = useRef<HTMLInputElement>(null);
   const lessonInputRef = useRef<HTMLInputElement>(null);
 
@@ -131,6 +141,19 @@ export function SetupSidebar() {
   const handleStartPlanning = () => {
     if (!worldDoc || !lessonDoc) return;
     const prompt = buildInitialPrompt(worldDoc, lessonDoc);
+    const convo = useConversationStore.getState();
+    const active = convo.activeSessionId;
+    const shouldCreateNew =
+      !active ||
+      (convo.sessions[active]?.messages.length ?? 0) > 0;
+    if (shouldCreateNew) {
+      convo.createSession({
+        docsSnapshot: {
+          worldDocName: worldDoc.name,
+          lessonDocName: lessonDoc.name,
+        },
+      });
+    }
     setInitialPrompt(prompt);
     toggleCollapse();
   };
@@ -155,7 +178,8 @@ export function SetupSidebar() {
   };
 
   const handleDelete = (id: string) => {
-    deleteArtifact(id);
+    if (!activeSessionId) return;
+    deleteArtifact(activeSessionId, id);
     setSelectedIds((prev) => prev.filter((x) => x !== id));
   };
 
@@ -198,6 +222,7 @@ export function SetupSidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        <SessionSwitcher />
         <DocUploadCard
           title="阶段世界观文档"
           description="上传整个阶段共用的剧情世界观"

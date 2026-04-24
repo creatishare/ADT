@@ -2,11 +2,13 @@ import { tool } from "ai";
 import { z } from "zod";
 import { type LanguageModel } from "ai";
 import { DESIGNER_PROMPT } from "@/lib/agents/prompts";
+import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import { runSubAgentText } from "./shared";
 
 export function createDesignStageFileTool(
   subAgentModel: LanguageModel,
+  modelId: ModelId,
   fallbackGuidance: string = ""
 ) {
   return tool({
@@ -63,6 +65,7 @@ export function createDesignStageFileTool(
 
       const text = await runSubAgentText({
         model: subAgentModel,
+        modelId,
         system: DESIGNER_PROMPT,
         prompt,
       });

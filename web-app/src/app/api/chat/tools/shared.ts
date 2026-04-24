@@ -1,32 +1,40 @@
 import { generateText, type LanguageModel } from "ai";
+import { getGate } from "@/lib/llm/gate";
+import { getProviderForModelId, type ModelId } from "@/lib/llm/providers";
 
 /**
  * Sub-agent call hardening.
  *
- * Two knobs every sub-agent tool should share:
+ * Three knobs every sub-agent tool shares:
  *
- * - `maxRetries: 1` — AI SDK default is 2 (= 3 attempts total). For
- *   ETIMEDOUT / ECONNRESET that's pure latency amplification: the upstream
- *   is unreachable, retrying 3× turns a 20s failure into a 60s failure.
- *   One retry is enough to paper over transient blips.
+ * - `maxRetries: 3` — with exponential backoff built into the AI SDK, this
+ *   papers over transient 429/503 bursts when multiple users hit the same
+ *   provider key. Bumped from `1` after observing multi-user RPM contention
+ *   in production. Retries still respect `timeout` below, so a permanently
+ *   unreachable upstream still fails in ~45s total.
  * - `timeout: 45_000` — wall-clock cap per sub-agent call. Prevents the
  *   undici/provider socket from hanging indefinitely when a proxy or
  *   upstream stalls mid-stream.
+ * - Provider-scoped concurrency gate — bounds the number of in-flight
+ *   sub-agent calls per provider to `keyPoolSize × LLM_PER_KEY_CONCURRENCY`
+ *   (default 3 per key). Extra work queues locally instead of bursting the
+ *   provider and immediately eating 429s.
  */
 
 export const SUB_AGENT_TIMEOUT_MS = 45_000;
-export const SUB_AGENT_MAX_RETRIES = 1;
+export const SUB_AGENT_MAX_RETRIES = 3;
 
 type RunSubAgentArgs = {
   model: LanguageModel;
+  modelId: ModelId;
   system: string;
   prompt: string;
 };
 
 /**
- * Wrapper around `generateText` that applies shared timeout/retry policy and
- * normalizes low-level network errors into Chinese, user-facing messages the
- * Orchestrator can reason about.
+ * Wrapper around `generateText` that applies shared timeout/retry/gate
+ * policy and normalizes low-level network errors into Chinese, user-facing
+ * messages the Orchestrator can reason about.
  *
  * Errors are re-thrown — the AI SDK tool runtime converts that into a
  * `tool-error` state for the Orchestrator, which already knows how to offer
@@ -34,18 +42,22 @@ type RunSubAgentArgs = {
  */
 export async function runSubAgentText({
   model,
+  modelId,
   system,
   prompt,
 }: RunSubAgentArgs): Promise<string> {
+  const gate = getGate(getProviderForModelId(modelId));
   try {
-    const { text } = await generateText({
-      model,
-      system,
-      prompt,
-      maxRetries: SUB_AGENT_MAX_RETRIES,
-      timeout: SUB_AGENT_TIMEOUT_MS,
+    return await gate.run(async () => {
+      const { text } = await generateText({
+        model,
+        system,
+        prompt,
+        maxRetries: SUB_AGENT_MAX_RETRIES,
+        timeout: SUB_AGENT_TIMEOUT_MS,
+      });
+      return text;
     });
-    return text;
   } catch (error) {
     throw new Error(classifySubAgentError(error));
   }

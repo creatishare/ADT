@@ -1,11 +1,13 @@
 import { tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { VALIDATOR_PROMPT } from "@/lib/agents/prompts";
+import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import { runSubAgentText } from "./shared";
 
 export function createValidateStageFileTool(
   subAgentModel: LanguageModel,
+  modelId: ModelId,
   fallbackGuidance: string = ""
 ) {
   return tool({
@@ -46,6 +48,7 @@ export function createValidateStageFileTool(
 
       const text = await runSubAgentText({
         model: subAgentModel,
+        modelId,
         system: VALIDATOR_PROMPT,
         prompt,
       });
