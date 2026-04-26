@@ -65,7 +65,7 @@ export function pickKey(provider: ProviderId): string | null {
   if (pool.keys.length === 0) return null;
   const key = pool.keys[pool.cursor % pool.keys.length];
   pool.cursor = (pool.cursor + 1) % pool.keys.length;
-  return key;
+  return key ?? null;
 }
 
 export function getPoolSize(provider: ProviderId): number {

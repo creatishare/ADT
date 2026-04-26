@@ -45,8 +45,8 @@ describe("memory helpers", () => {
     ]);
 
     expect(result).toHaveLength(2);
-    expect(result[0].role).toBe("user");
-    expect(result[1].role).toBe("assistant");
+    expect(result[0]!.role).toBe("user");
+    expect(result[1]!.role).toBe("assistant");
   });
 
   it("builds transcript from normalized messages", () => {

@@ -26,7 +26,7 @@ describe("useConversationStore", () => {
     expect(state.activeSessionId).toBe(id);
     expect(state.orderedIds[0]).toBe(id);
     expect(state.sessions[id]).toBeDefined();
-    expect(state.sessions[id].messages).toEqual([]);
+    expect(state.sessions[id]!.messages).toEqual([]);
   });
 
   it("stores docsSnapshot on creation", () => {
@@ -37,7 +37,7 @@ describe("useConversationStore", () => {
       },
     });
     const s = useConversationStore.getState().sessions[id];
-    expect(s.docsSnapshot).toEqual({
+    expect(s!.docsSnapshot).toEqual({
       worldDocName: "world.md",
       lessonDocName: "lesson.md",
     });
@@ -71,21 +71,21 @@ describe("useConversationStore", () => {
   it("renames a session", () => {
     const id = useConversationStore.getState().createSession();
     useConversationStore.getState().renameSession(id, "  我的策划  ");
-    expect(useConversationStore.getState().sessions[id].name).toBe("我的策划");
+    expect(useConversationStore.getState().sessions[id]!.name).toBe("我的策划");
   });
 
   it("ignores empty rename", () => {
     const id = useConversationStore.getState().createSession();
-    const before = useConversationStore.getState().sessions[id].name;
+    const before = useConversationStore.getState().sessions[id]!.name;
     useConversationStore.getState().renameSession(id, "   ");
-    expect(useConversationStore.getState().sessions[id].name).toBe(before);
+    expect(useConversationStore.getState().sessions[id]!.name).toBe(before);
   });
 
   it("setMessages auto-derives name from first user message", () => {
     const id = useConversationStore.getState().createSession();
     const msgs = [textMessage("user", "m1", "请设计一个关于循环的关卡")];
     useConversationStore.getState().setMessages(id, msgs);
-    const name = useConversationStore.getState().sessions[id].name;
+    const name = useConversationStore.getState().sessions[id]!.name;
     expect(name).toBe("请设计一个关于循环的关卡");
   });
 
@@ -108,9 +108,9 @@ describe("useConversationStore", () => {
     );
 
     useConversationStore.getState().setMessages(id, msgs);
-    const stored = useConversationStore.getState().sessions[id].messages;
+    const stored = useConversationStore.getState().sessions[id]!.messages;
     expect(stored.length).toBeLessThan(msgs.length);
-    expect(stored[stored.length - 1].id).toBe("m-29");
+    expect(stored[stored.length - 1]!.id).toBe("m-29");
   });
 
   it("prunes oldest sessions when exceeding MAX_SESSIONS", () => {

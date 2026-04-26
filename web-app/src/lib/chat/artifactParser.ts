@@ -206,22 +206,28 @@ export function normalizeMarkdown(content: string): string {
     /^\s*\|.*\|\s*$/.test(line) && line.trim().length > 2;
 
   while (i < lines.length) {
-    if (isTableLine(lines[i]) && i + 1 < lines.length && isTableLine(lines[i + 1])) {
+    const cur = lines[i] ?? "";
+    const nxt = lines[i + 1] ?? "";
+    if (isTableLine(cur) && i + 1 < lines.length && isTableLine(nxt)) {
       const block: string[] = [];
-      while (i < lines.length && isTableLine(lines[i])) {
-        block.push(lines[i].replace(/^\s+/, ""));
+      while (i < lines.length) {
+        const blockLine = lines[i];
+        if (blockLine === undefined || !isTableLine(blockLine)) break;
+        block.push(blockLine.replace(/^\s+/, ""));
         i += 1;
       }
-      if (result.length > 0 && result[result.length - 1].trim() !== "") {
+      const lastResult = result[result.length - 1];
+      if (result.length > 0 && lastResult !== undefined && lastResult.trim() !== "") {
         result.push("");
       }
       result.push(...block);
-      if (i < lines.length && lines[i].trim() !== "") {
+      const after = lines[i];
+      if (i < lines.length && after !== undefined && after.trim() !== "") {
         result.push("");
       }
       continue;
     }
-    result.push(lines[i]);
+    result.push(cur);
     i += 1;
   }
   return result.join("\n");
@@ -254,7 +260,7 @@ export function parseOrchestratorState(
   text: string
 ): OrchestratorState | null {
   const match = text.match(STATE_BLOCK_REGEX);
-  if (!match) return null;
+  if (!match || match[1] === undefined) return null;
   try {
     const raw = JSON.parse(match[1]) as Partial<OrchestratorState>;
     return {

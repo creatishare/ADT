@@ -196,7 +196,7 @@ function ChatSession({ sessionId, className }: ChatSessionProps) {
   const latestState: OrchestratorState | null = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const m = messages[i];
-      if (m.role !== "assistant") continue;
+      if (!m || m.role !== "assistant") continue;
       const parsed = parseOrchestratorState(getMessageText(m));
       if (parsed) return parsed;
     }

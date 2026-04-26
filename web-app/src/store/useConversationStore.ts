@@ -62,7 +62,7 @@ function deriveNameFromMessages(messages: UIMessage[]): string | null {
       .join(" ")
       .trim();
     if (!text) continue;
-    const firstLine = text.split("\n")[0].trim();
+    const firstLine = (text.split("\n")[0] ?? "").trim();
     return firstLine.slice(0, 30);
   }
   return null;
@@ -130,7 +130,7 @@ function isStreamingToolPart(part: UIMessage["parts"][number]): boolean {
 function dropZombieMessages(messages: UIMessage[]): UIMessage[] {
   if (messages.length === 0) return messages;
   const last = messages[messages.length - 1];
-  if (last.role !== "assistant") return messages;
+  if (!last || last.role !== "assistant") return messages;
   const hasStuckTool = last.parts.some(isStreamingToolPart);
   if (hasStuckTool) {
     return messages.slice(0, -1);

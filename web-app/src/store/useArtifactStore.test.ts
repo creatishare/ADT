@@ -25,13 +25,13 @@ describe("useArtifactStore (per-session)", () => {
 
     expect(list).toHaveLength(1);
     expect(state.activeArtifactIdBySession[SID]).toBe("artifact-1");
-    expect(list[0]).toMatchObject({
+    expect(list![0]).toMatchObject({
       id: "artifact-1",
       title: "测试文档",
       type: "markdown",
       content: "# hello",
     });
-    expect(typeof list[0].timestamp).toBe("number");
+    expect(typeof list![0]!.timestamp).toBe("number");
   });
 
   it("isolates artifacts between sessions", () => {
@@ -52,8 +52,8 @@ describe("useArtifactStore (per-session)", () => {
     const state = useArtifactStore.getState();
     expect(state.bySession[SID]).toHaveLength(1);
     expect(state.bySession[OTHER]).toHaveLength(1);
-    expect(state.bySession[SID][0].id).toBe("a");
-    expect(state.bySession[OTHER][0].id).toBe("b");
+    expect(state.bySession[SID]![0]!.id).toBe("a");
+    expect(state.bySession[OTHER]![0]!.id).toBe("b");
   });
 
   it("prevents duplicate artifacts with the same id within a session", () => {
@@ -73,8 +73,8 @@ describe("useArtifactStore (per-session)", () => {
 
     const list = useArtifactStore.getState().bySession[SID];
     expect(list).toHaveLength(1);
-    expect(list[0].title).toBe("第一次");
-    expect(list[0].content).toBe("A");
+    expect(list![0]!.title).toBe("第一次");
+    expect(list![0]!.content).toBe("A");
   });
 
   it("sets active artifact manually per session", () => {
@@ -108,7 +108,7 @@ describe("useArtifactStore (per-session)", () => {
     });
 
     store.updateArtifactContent(SID, "artifact-1", "新内容");
-    expect(useArtifactStore.getState().bySession[SID][0].content).toBe("新内容");
+    expect(useArtifactStore.getState().bySession[SID]![0]!.content).toBe("新内容");
   });
 
   it("deletes an artifact and advances active to next within session", () => {
@@ -130,7 +130,7 @@ describe("useArtifactStore (per-session)", () => {
 
     const state = useArtifactStore.getState();
     expect(state.bySession[SID]).toHaveLength(1);
-    expect(state.bySession[SID][0].id).toBe("a2");
+    expect(state.bySession[SID]![0]!.id).toBe("a2");
     expect(state.activeArtifactIdBySession[SID]).toBe("a2");
   });
 
