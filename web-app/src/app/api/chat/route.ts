@@ -26,6 +26,7 @@ import {
   getMemoryCacheEntry,
   setMemoryCacheEntry,
 } from "@/lib/chat/memoryCache";
+import { logChatDebug } from "@/lib/chat/debug";
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -102,20 +103,6 @@ function getChunkType(chunk: unknown): string {
   if (!chunk || typeof chunk !== "object") return "unknown";
   const maybeChunk = chunk as StreamDebugChunk;
   return typeof maybeChunk.type === "string" ? maybeChunk.type : "unknown";
-}
-
-// ---------------------------------------------------------------------------
-// Debug logging
-// ---------------------------------------------------------------------------
-
-function logChatDebug(label: string, payload?: unknown) {
-  const prefix = `[chat-debug] ${label}`;
-  if (payload === undefined) { console.error(prefix); return; }
-  try {
-    console.error(prefix, JSON.stringify(payload));
-  } catch {
-    console.error(prefix, payload);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -332,13 +319,14 @@ export async function POST(req: Request) {
   const requestMessages = normalizeMessages(rawMessages);
 
   if (debugEnabled) {
+    // Provider-specific env state is logged later in `request.pre-stream`
+    // and (for OpenAI-compat) in `openai.upstream-response`. Keep this
+    // entry purely about the inbound request so it stays accurate
+    // regardless of which model the client routes to.
     logChatDebug("request.received", {
       rawMessages: rawMessages.length,
       normalizedMessages: requestMessages.length,
       e2eTestMode: isE2ETestMode(req),
-      modelFromEnv: process.env.GOOGLE_GENERATIVE_AI_MODEL ?? null,
-      hasAuthToken: Boolean(process.env.GOOGLE_GENERATIVE_AI_API_KEY),
-      hasBaseUrl: Boolean(process.env.GOOGLE_GENERATIVE_AI_BASE_URL),
     });
   }
 

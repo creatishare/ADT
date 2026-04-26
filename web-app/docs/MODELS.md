@@ -79,8 +79,10 @@ OPENAI_API_KEY="sk-proj-..."
 # 走第三方中转或自建兼容代理
 OPENAI_BASE_URL="https://api.openai.com/v1"
 
-# 覆盖模型名。GPT 5.2 未发布前可先用 gpt-4o / gpt-4.1
-OPENAI_MODEL="gpt-4o"
+# 覆盖实际打到上游 API 的模型名（默认 "gpt-5.4"）。
+# 走第三方代理时这个值要与代理实际支持的模型名严格一致；
+# 官方 OpenAI 账号未授权 gpt-5.4 时可降级为 gpt-4o / gpt-4.1 等。
+OPENAI_MODEL="gpt-5.4"
 ```
 
 ### 常见问题

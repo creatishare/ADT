@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Agent Designer · 工作台</title>
+<script src="https://unpkg.com/@tailwindcss/browser@4.0.6/dist/index.global.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Source+Serif+4:wght@500;600&display=swap");
+
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "ss01", "cv11";
+  }
+  .font-mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* Tighter type metrics */
+  h1, h2, h3 { letter-spacing: -0.012em; }
+
+  /* Scrollbars — barely-there */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--fg-muted, #999) 30%, transparent);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--fg-muted, #999) 50%, transparent);
+  }
+
+  /* Thinking dot animation */
+  @keyframes thinking-dot {
+    0%, 80%, 100% { transform: translateY(0) scale(0.85); opacity: 0.45; }
+    40% { transform: translateY(-3px) scale(1); opacity: 1; }
+  }
+  .thinking-dot { animation: thinking-dot 1.2s ease-in-out infinite; }
+
+  @keyframes thinking-shimmer {
+    0% { background-position: -120% 0; }
+    100% { background-position: 220% 0; }
+  }
+  .thinking-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      var(--fg-muted) 0%,
+      var(--fg-muted) 35%,
+      var(--fg-primary) 50%,
+      var(--fg-muted) 65%,
+      var(--fg-muted) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: thinking-shimmer 2.4s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-dot, .thinking-shimmer { animation: none; }
+    .thinking-shimmer { color: var(--fg-muted); }
+  }
+
+  input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#ece2d5">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1200" height="800" fill="#ece2d5"/>
+    <rect x="60" y="60" width="1080" height="80" rx="20" fill="#f7f1e8"/>
+    <rect x="90" y="85" width="34" height="30" rx="8" fill="#1a1714"/>
+    <rect x="500" y="90" width="200" height="20" rx="10" fill="#ece2d5"/>
+    <rect x="60" y="170" width="240" height="570" rx="20" fill="#f7f1e8"/>
+    <rect x="320" y="170" width="500" height="570" rx="20" fill="#f7f1e8"/>
+    <rect x="840" y="170" width="300" height="570" rx="20" fill="#f7f1e8"/>
+    <circle cx="940" cy="260" r="22" fill="#f3dfcd"/>
+    <rect x="870" y="310" width="240" height="14" rx="7" fill="#ece2d5"/>
+    <rect x="870" y="334" width="180" height="14" rx="7" fill="#ece2d5"/>
+    <rect x="870" y="380" width="240" height="80" rx="14" fill="#ffffff"/>
+    <rect x="870" y="476" width="240" height="80" rx="14" fill="#ffffff"/>
+    <rect x="600" y="690" width="120" height="32" rx="16" fill="#1a1714"/>
+  </svg>
+</template>
+<div id="root"></div>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

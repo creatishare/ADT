@@ -1,12 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { MessagesSquare, Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  MessagesSquare,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConversationStore } from "@/store/useConversationStore";
 import { useArtifactStore } from "@/store/useArtifactStore";
 import { useSetupStore } from "@/store/useSetupStore";
 import { formatTimestamp } from "@/lib/chat/artifactParser";
+import { StatusDot } from "@/components/workspace/primitives/StatusDot";
 
 const switcherTestIds = {
   root: "session-switcher",
@@ -27,6 +37,7 @@ export function SessionSwitcher() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
+  const [isExpanded, setIsExpanded] = useState(true);
 
   const orderedSessions = useMemo(
     () => orderedIds.map((id) => sessions[id]).filter((x) => !!x),
@@ -70,140 +81,200 @@ export function SessionSwitcher() {
   };
 
   return (
-    <div className="rounded-2xl bg-[var(--surface-ground)] overflow-hidden" data-testid={switcherTestIds.root}>
-      <div className="flex items-center justify-between px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-medium text-[var(--fg-primary)]">
-          <MessagesSquare className="h-4 w-4 text-[var(--fg-muted)]" />
+    <div
+      className="overflow-hidden rounded-2xl"
+      style={{
+        background: "var(--surface-elev)",
+        boxShadow: "inset 0 0 0 1px var(--border)",
+      }}
+      data-testid={switcherTestIds.root}
+    >
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          className="flex flex-1 items-center gap-2 text-left text-[12px] font-semibold text-[var(--fg-primary)]"
+          aria-expanded={isExpanded}
+        >
+          <MessagesSquare
+            className="h-3.5 w-3.5"
+            style={{ color: "var(--fg-muted)" }}
+          />
           策划会话
-          {orderedSessions.length > 0 && (
-            <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-ink)]">
+          {orderedSessions.length > 0 ? (
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{
+                background: "var(--accent-soft)",
+                color: "var(--accent-ink)",
+              }}
+            >
               {orderedSessions.length}
             </span>
+          ) : null}
+          {isExpanded ? (
+            <ChevronUp
+              className="ml-auto h-3.5 w-3.5"
+              style={{ color: "var(--fg-faint)" }}
+            />
+          ) : (
+            <ChevronDown
+              className="ml-auto h-3.5 w-3.5"
+              style={{ color: "var(--fg-faint)" }}
+            />
           )}
-        </span>
+        </button>
         <button
           type="button"
           onClick={handleCreate}
           title="新建策划"
           data-testid={switcherTestIds.newButton}
-          className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-inverse)] px-2.5 py-1 text-[11px] font-medium text-[var(--fg-inverse)] transition-opacity hover:opacity-90"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-opacity hover:opacity-90"
+          style={{
+            background: "var(--surface-inverse)",
+            color: "var(--fg-inverse)",
+          }}
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-3 w-3" />
           新建
         </button>
       </div>
 
-      {orderedSessions.length === 0 ? (
-        <div className="px-4 pb-4 text-xs text-[var(--fg-muted)]">
-          还没有策划会话，点击「新建」或上传文档后点击「开始策划」。
-        </div>
-      ) : (
-        <ul
-          className="max-h-64 overflow-y-auto bg-[var(--surface-card)]"
-          data-testid={switcherTestIds.list}
-        >
-          {orderedSessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            const isEditing = editingId === session.id;
-            const snapshotLabel = [
-              session.docsSnapshot?.worldDocName,
-              session.docsSnapshot?.lessonDocName,
-            ]
-              .filter(Boolean)
-              .join(" · ");
-            return (
-              <li
-                key={session.id}
-                data-testid={switcherTestIds.item}
-                className={cn(
-                  "group flex items-center gap-2 px-3 py-2.5 transition-colors",
-                  isActive
-                    ? "bg-[var(--accent-soft)]"
-                    : "hover:bg-[var(--surface-ground)]"
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => switchSession(session.id)}
-                  className="min-w-0 flex-1 text-left"
-                  disabled={isEditing}
-                >
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={draftName}
-                      autoFocus
-                      onChange={(e) => setDraftName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitEdit();
-                        if (e.key === "Escape") cancelEdit();
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full rounded-md bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--fg-primary)] outline-none ring-1 ring-[var(--accent)]"
-                      maxLength={80}
-                    />
-                  ) : (
-                    <p
-                      className={cn(
-                        "truncate text-xs font-medium",
-                        isActive
-                          ? "text-[var(--accent-ink)]"
-                          : "text-[var(--fg-primary)]"
-                      )}
-                    >
-                      {session.name}
-                    </p>
+      {isExpanded ? (
+        orderedSessions.length === 0 ? (
+          <div
+            className="px-3 pb-3 text-[11px]"
+            style={{ color: "var(--fg-muted)" }}
+          >
+            还没有策划会话，点击「新建」或上传文档后点击「开始策划」。
+          </div>
+        ) : (
+          <ul
+            className="max-h-64 overflow-y-auto"
+            data-testid={switcherTestIds.list}
+          >
+            {orderedSessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              const isEditing = editingId === session.id;
+              const snapshotLabel = [
+                session.docsSnapshot?.worldDocName,
+                session.docsSnapshot?.lessonDocName,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <li
+                  key={session.id}
+                  data-testid={switcherTestIds.item}
+                  className={cn(
+                    "group flex items-center gap-2 px-3 py-2 transition-colors"
                   )}
-                  <p className="mt-0.5 truncate text-[10px] text-[var(--fg-muted)]">
-                    {formatTimestamp(session.updatedAt)}
-                    {snapshotLabel ? ` · ${snapshotLabel}` : ""}
-                  </p>
-                </button>
+                  style={{
+                    background: isActive
+                      ? "var(--accent-soft)"
+                      : "transparent",
+                  }}
+                >
+                  <StatusDot tone={isActive ? "accent" : "muted"} />
+                  <button
+                    type="button"
+                    onClick={() => switchSession(session.id)}
+                    className="min-w-0 flex-1 text-left"
+                    disabled={isEditing}
+                  >
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={draftName}
+                        autoFocus
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit();
+                          if (e.key === "Escape") cancelEdit();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full rounded-md px-2 py-1 text-[11px] text-[var(--fg-primary)] outline-none"
+                        style={{
+                          background: "var(--surface-card)",
+                          boxShadow: "inset 0 0 0 1px var(--accent)",
+                        }}
+                        maxLength={80}
+                      />
+                    ) : (
+                      <p
+                        className="truncate text-[12px] font-medium"
+                        style={{
+                          color: isActive
+                            ? "var(--accent-ink)"
+                            : "var(--fg-primary)",
+                        }}
+                      >
+                        {session.name}
+                      </p>
+                    )}
+                    <p
+                      className="mt-0.5 truncate font-mono text-[10px]"
+                      style={{
+                        color: isActive
+                          ? "var(--accent-ink)"
+                          : "var(--fg-faint)",
+                        opacity: isActive ? 0.7 : 1,
+                      }}
+                    >
+                      {formatTimestamp(session.updatedAt)}
+                      {snapshotLabel ? ` · ${snapshotLabel}` : ""}
+                    </p>
+                  </button>
 
-                {isEditing ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={commitEdit}
-                      title="保存"
-                      className="shrink-0 rounded-full p-1 text-[var(--success-ink)] hover:bg-[var(--success-soft)]"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      title="取消"
-                      className="shrink-0 rounded-full p-1 text-[var(--fg-muted)] hover:bg-[var(--surface-ground)]"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </>
-                ) : (
-                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      type="button"
-                      onClick={() => startEdit(session.id, session.name)}
-                      title="重命名"
-                      className="rounded-full p-1 text-[var(--fg-muted)] hover:bg-[var(--surface-ground)] hover:text-[var(--fg-primary)]"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(session.id)}
-                      title="删除"
-                      className="rounded-full p-1 text-[var(--fg-muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  {isEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={commitEdit}
+                        title="保存"
+                        className="shrink-0 rounded-full p-1 transition-colors hover:bg-[var(--success-soft)]"
+                        style={{ color: "var(--success-ink)" }}
+                      >
+                        <Check className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        title="取消"
+                        className="shrink-0 rounded-full p-1 transition-colors hover:bg-[var(--surface-elev)]"
+                        style={{ color: "var(--fg-muted)" }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(session.id, session.name)}
+                        title="重命名"
+                        className="rounded-full p-1 transition-colors hover:bg-[var(--surface-card)]"
+                        style={{ color: "var(--fg-muted)" }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(session.id)}
+                        title="删除"
+                        className="rounded-full p-1 transition-colors hover:bg-[var(--danger-soft)]"
+                        style={{ color: "var(--fg-muted)" }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )
+      ) : null}
     </div>
   );
 }

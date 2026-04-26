@@ -18,16 +18,12 @@ export default function Home() {
     activeSessionId ? (s.bySession[activeSessionId]?.length ?? 0) : 0
   );
 
-  const handleTabClick = (tab: "chat" | "artifacts") => {
-    setViewMode((prev) => (prev === tab ? "split" : tab));
-  };
-
   return (
     <ErrorBoundary label="应用">
       <main className="h-screen w-full bg-[var(--surface-ground)] overflow-hidden text-[var(--fg-primary)] flex flex-col">
         <TopBar
           viewMode={viewMode}
-          onTabClick={handleTabClick}
+          onViewModeChange={setViewMode}
           artifactCount={artifactCount}
         />
 
