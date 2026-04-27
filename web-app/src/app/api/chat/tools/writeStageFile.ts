@@ -3,7 +3,7 @@ import { z } from "zod";
 import { WRITER_PROMPT } from "@/lib/agents/prompts";
 import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
-import { runSubAgentText } from "./shared";
+import { runSubAgentText, SUB_AGENT_TIMEOUT_HEAVY_MS } from "./shared";
 
 export function createWriteStageFileTool(
   subAgentModel: LanguageModel,
@@ -51,6 +51,7 @@ export function createWriteStageFileTool(
         modelId,
         system: WRITER_PROMPT,
         prompt,
+        timeoutMs: SUB_AGENT_TIMEOUT_HEAVY_MS,
       });
 
       return {

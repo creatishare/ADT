@@ -10,18 +10,26 @@ import { getProviderForModelId, type ModelId } from "@/lib/llm/providers";
  * - `maxRetries: 3` — with exponential backoff built into the AI SDK, this
  *   papers over transient 429/503 bursts when multiple users hit the same
  *   provider key. Bumped from `1` after observing multi-user RPM contention
- *   in production. Retries still respect `timeout` below, so a permanently
- *   unreachable upstream still fails in ~45s total.
- * - `timeout: 45_000` — wall-clock cap per sub-agent call. Prevents the
- *   undici/provider socket from hanging indefinitely when a proxy or
- *   upstream stalls mid-stream.
+ *   in production. Retries still respect the per-call `timeout` below, so a
+ *   permanently unreachable upstream still fails within the configured
+ *   wall-clock cap.
+ * - Tiered `timeout` — wall-clock cap per sub-agent call.
+ *     - `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s): designStageFile, generateVisualDesign
+ *     - `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s): validateStageFile, writeStageFile
+ *   Heavy tools operate on accumulated documents whose prompts grow with
+ *   each round; the previous flat 45s was insufficient once 3+ topic groups
+ *   had been processed (sub-agent calls reliably hit network_timeout).
+ *   Prevents the undici/provider socket from hanging indefinitely when a
+ *   proxy or upstream stalls mid-stream.
  * - Provider-scoped concurrency gate — bounds the number of in-flight
  *   sub-agent calls per provider to `keyPoolSize × LLM_PER_KEY_CONCURRENCY`
  *   (default 3 per key). Extra work queues locally instead of bursting the
  *   provider and immediately eating 429s.
  */
 
-export const SUB_AGENT_TIMEOUT_MS = 45_000;
+export const SUB_AGENT_TIMEOUT_LIGHT_MS = 60_000;
+export const SUB_AGENT_TIMEOUT_HEAVY_MS = 120_000;
+export const SUB_AGENT_TIMEOUT_MS = SUB_AGENT_TIMEOUT_LIGHT_MS;
 export const SUB_AGENT_MAX_RETRIES = 3;
 
 type RunSubAgentArgs = {
@@ -29,12 +37,17 @@ type RunSubAgentArgs = {
   modelId: ModelId;
   system: string;
   prompt: string;
+  timeoutMs?: number;
 };
 
 /**
  * Wrapper around `generateText` that applies shared timeout/retry/gate
  * policy and normalizes low-level network errors into Chinese, user-facing
  * messages the Orchestrator can reason about.
+ *
+ * `timeoutMs` defaults to `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s) for concept
+ * generation. Heavy tools (validate/write) that operate on accumulated
+ * documents should pass `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s).
  *
  * Errors are re-thrown — the AI SDK tool runtime converts that into a
  * `tool-error` state for the Orchestrator, which already knows how to offer
@@ -45,6 +58,7 @@ export async function runSubAgentText({
   modelId,
   system,
   prompt,
+  timeoutMs = SUB_AGENT_TIMEOUT_LIGHT_MS,
 }: RunSubAgentArgs): Promise<string> {
   const gate = getGate(getProviderForModelId(modelId));
   try {
@@ -54,12 +68,12 @@ export async function runSubAgentText({
         system,
         prompt,
         maxRetries: SUB_AGENT_MAX_RETRIES,
-        timeout: SUB_AGENT_TIMEOUT_MS,
+        timeout: timeoutMs,
       });
       return text;
     });
   } catch (error) {
-    throw new Error(classifySubAgentError(error));
+    throw new Error(classifySubAgentError(error, timeoutMs));
   }
 }
 
@@ -69,7 +83,10 @@ export async function runSubAgentText({
  * Orchestrator prompt (or future code) branch on error kind without parsing
  * free-form English stack traces.
  */
-export function classifySubAgentError(error: unknown): string {
+export function classifySubAgentError(
+  error: unknown,
+  timeoutMs: number = SUB_AGENT_TIMEOUT_LIGHT_MS
+): string {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
 
@@ -79,7 +96,7 @@ export function classifySubAgentError(error: unknown): string {
     lower.includes("timed out") ||
     lower.includes("aborted") && lower.includes("timeout")
   ) {
-    return `[network_timeout] 子 Agent 调用超时（${SUB_AGENT_TIMEOUT_MS / 1000}s 内未返回）。可能是当前网络不能直连该模型供应商，或代理不稳定。`;
+    return `[network_timeout] 子 Agent 调用超时（${timeoutMs / 1000}s 内未返回）。可能是当前网络不能直连该模型供应商，或代理不稳定。`;
   }
   if (
     lower.includes("econnreset") ||

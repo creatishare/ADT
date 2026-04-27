@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { classifySubAgentError } from "./shared";
+import {
+  classifySubAgentError,
+  SUB_AGENT_TIMEOUT_HEAVY_MS,
+  SUB_AGENT_TIMEOUT_LIGHT_MS,
+} from "./shared";
 
 describe("classifySubAgentError", () => {
   it("tags ETIMEDOUT as network_timeout", () => {
@@ -44,5 +48,17 @@ describe("classifySubAgentError", () => {
   it("handles non-Error inputs", () => {
     expect(classifySubAgentError("raw string")).toMatch(/^\[sub_agent_error\]/);
     expect(classifySubAgentError(undefined)).toMatch(/^\[sub_agent_error\]/);
+  });
+
+  it("reflects the configured timeout in network_timeout messages", () => {
+    const lightMsg = classifySubAgentError(new Error("connect timeout"));
+    expect(lightMsg).toContain(`${SUB_AGENT_TIMEOUT_LIGHT_MS / 1000}s`);
+
+    const heavyMsg = classifySubAgentError(
+      new Error("connect timeout"),
+      SUB_AGENT_TIMEOUT_HEAVY_MS
+    );
+    expect(heavyMsg).toContain(`${SUB_AGENT_TIMEOUT_HEAVY_MS / 1000}s`);
+    expect(heavyMsg).not.toContain(`${SUB_AGENT_TIMEOUT_LIGHT_MS / 1000}s`);
   });
 });
