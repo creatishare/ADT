@@ -14,11 +14,15 @@ import { getProviderForModelId, type ModelId } from "@/lib/llm/providers";
  *   permanently unreachable upstream still fails within the configured
  *   wall-clock cap.
  * - Tiered `timeout` — wall-clock cap per sub-agent call.
- *     - `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s): designStageFile, generateVisualDesign
- *     - `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s): validateStageFile, writeStageFile
- *   Heavy tools operate on accumulated documents whose prompts grow with
+ *     - `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s): generateVisualDesign,
+ *       designStageFile in `generate_concepts` mode
+ *     - `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s): validateStageFile,
+ *       writeStageFile, designStageFile in `integrate_document` mode
+ *   Heavy calls operate on accumulated documents whose prompts grow with
  *   each round; the previous flat 45s was insufficient once 3+ topic groups
  *   had been processed (sub-agent calls reliably hit network_timeout).
+ *   `integrate_document` is heavy because the "二次回修" path re-runs it
+ *   with prior selections + validation feedback merged into the prompt.
  *   Prevents the undici/provider socket from hanging indefinitely when a
  *   proxy or upstream stalls mid-stream.
  * - Provider-scoped concurrency gate — bounds the number of in-flight

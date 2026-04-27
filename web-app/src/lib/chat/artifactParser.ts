@@ -175,21 +175,36 @@ export function getParsedContent(content: string): string {
  * Normalize LLM-generated markdown so remark-gfm can render tables/lists.
  *
  * Common LLM quirks we fix:
- * 1. Em/en-dashes (—/–) used as bullet markers → convert to "-".
- * 2. Em-dashes used in table separator rows (|———|———|) → convert to "-".
- * 3. Tables indented because they sit inside a list item → dedent and
+ * 1. ``` ```markdown ``` / ``` ```md ``` fences wrapping section bodies. The
+ *    Designer/Validator/Writer prompts use these fences to mark *template
+ *    examples*; the model often copies the pattern verbatim and wraps every
+ *    section of its real output the same way, which makes ReactMarkdown
+ *    render tables/headings/bold as raw text inside <pre><code>. Strip these
+ *    anywhere they appear. Generic ``` fences without a language tag are
+ *    preserved — they may be intentional code blocks (e.g. C++ snippets).
+ * 2. Outer fence wrapping the whole output (any language).
+ * 3. Em/en-dashes (—/–) used as bullet markers → convert to "-".
+ * 4. Em-dashes used in table separator rows (|———|———|) → convert to "-".
+ * 5. Tables indented because they sit inside a list item → dedent and
  *    surround with blank lines so remark-gfm recognises them as tables.
  */
 export function normalizeMarkdown(content: string): string {
-  // Strip wrapping code fences that LLMs sometimes add around their markdown output.
-  let out = content
-    .replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/, "$1")
+  // 1. Strip ```markdown / ```md fences anywhere in the content (line-anchored).
+  let out = content.replace(
+    /^[ \t]*```(?:markdown|md)[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```[ \t]*$/gm,
+    "$1"
+  );
+
+  // 2. Strip a single outer fence (any language, or none) wrapping the
+  //    entire content — preserved from the legacy implementation.
+  out = out
+    .replace(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n```\s*$/, "$1")
     .trimStart();
 
-  // 1. List bullets using Chinese-style dashes at line start (with optional indent).
+  // 3. List bullets using Chinese-style dashes at line start (with optional indent).
   out = out.replace(/^(\s*)[–—]\s+/gm, "$1- ");
 
-  // 2. Table separator rows: a line that is only pipes + dashes/em-dashes/spaces.
+  // 4. Table separator rows: a line that is only pipes + dashes/em-dashes/spaces.
   out = out.replace(
     /^(\s*)\|([\s\-—–|:]+)\|[ \t]*$/gm,
     (_match, indent: string, middle: string) => {
@@ -198,7 +213,7 @@ export function normalizeMarkdown(content: string): string {
     }
   );
 
-  // 3. Dedent tables & pad with blank lines so GFM parser kicks in.
+  // 5. Dedent tables & pad with blank lines so GFM parser kicks in.
   const lines = out.split("\n");
   const result: string[] = [];
   let i = 0;

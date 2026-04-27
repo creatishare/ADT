@@ -330,7 +330,7 @@ export function SetupSidebar() {
                 style={{ borderColor: "var(--border)" }}
               >
                 <div
-                  className="flex items-center justify-between px-3 py-2"
+                  className="flex items-center justify-between gap-2 px-3 py-2"
                   style={{ borderBottom: "1px solid var(--border)" }}
                 >
                   <button
@@ -343,12 +343,42 @@ export function SetupSidebar() {
                       ? "取消全选"
                       : "全选"}
                   </button>
-                  <span
-                    className="font-mono text-[10px]"
-                    style={{ color: "var(--fg-faint)" }}
-                  >
-                    已选 {selectedIds.length} / {sortedArtifacts.length}
-                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <span
+                      className="font-mono text-[10px]"
+                      style={{ color: "var(--fg-faint)" }}
+                    >
+                      已选 {selectedIds.length} / {sortedArtifacts.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={selectedIds.length === 0}
+                      onClick={handleDownloadSelected}
+                      title={
+                        selectedIds.length === 0
+                          ? "请先勾选要下载的成果"
+                          : `下载选中的 ${selectedIds.length} 份成果`
+                      }
+                      className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed"
+                      style={{
+                        background:
+                          selectedIds.length === 0
+                            ? "var(--surface-elev)"
+                            : "var(--surface-inverse)",
+                        color:
+                          selectedIds.length === 0
+                            ? "var(--fg-faint)"
+                            : "var(--fg-inverse)",
+                        boxShadow:
+                          selectedIds.length === 0
+                            ? "inset 0 0 0 1px var(--border)"
+                            : "none",
+                      }}
+                    >
+                      <Download className="h-3 w-3" />
+                      下载
+                    </button>
+                  </div>
                 </div>
 
                 <ul className="max-h-64 overflow-y-auto">
@@ -410,35 +440,6 @@ export function SetupSidebar() {
                     );
                   })}
                 </ul>
-
-                <div
-                  className="p-2"
-                  style={{ borderTop: "1px solid var(--border)" }}
-                >
-                  <button
-                    type="button"
-                    disabled={selectedIds.length === 0}
-                    onClick={handleDownloadSelected}
-                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed"
-                    style={{
-                      background:
-                        selectedIds.length === 0
-                          ? "var(--surface-elev)"
-                          : "var(--surface-inverse)",
-                      color:
-                        selectedIds.length === 0
-                          ? "var(--fg-faint)"
-                          : "var(--fg-inverse)",
-                      boxShadow:
-                        selectedIds.length === 0
-                          ? "inset 0 0 0 1px var(--border)"
-                          : "none",
-                    }}
-                  >
-                    <Download className="h-3 w-3" />
-                    下载选中 ({selectedIds.length})
-                  </button>
-                </div>
               </div>
             ) : null}
           </div>
