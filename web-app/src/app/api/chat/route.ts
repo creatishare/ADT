@@ -61,8 +61,6 @@ const CHAT_TEST_SCENARIO_MARKER =
   /\[test-scenario:(success|approval|tool-error|request-error)\]/i;
 const CHAT_DEBUG_HEADER = "x-chat-debug";
 const MODEL_ID_HEADER = "x-model-id";
-const EMPTY_PROVIDER_RESPONSE_MESSAGE =
-  "当前模型服务返回了空响应，未生成任何文本或工具结果。请检查代理兼容性、API 返回格式，或切换模型配置后重试。";
 
 type StreamDebugChunk = { type?: string };
 
@@ -480,15 +478,27 @@ export async function POST(req: Request) {
           });
         }
       },
-      onFinish: ({ text, finishReason, totalUsage, steps }) => {
+      onFinish: ({ text, finishReason, totalUsage, steps, response }) => {
         releaseGate();
+        const visibleText = text.trim().length > 0;
+        const hasMessages = response.messages.length > 0;
         if (debugEnabled) {
           logChatDebug("stream.finish", {
             textLength: text.length,
             finishReason: normalizeFinishReason(finishReason),
             steps: steps.length,
             totalUsage: totalUsage ?? null,
+            visibleText,
+            hasMessages,
           });
+        }
+        if (!visibleText && !hasMessages && debugEnabled) {
+          // Provider returned an entirely empty response. We can't substitute
+          // a fallback here without buffering the whole stream up-front
+          // (which used to time out the browser at ~6 min). Surface the case
+          // to the chat-debug log so it's diagnosable; the UI will receive
+          // an empty message and can render its own retry hint.
+          logChatDebug("stream.empty-response", { modelId });
         }
       },
       tools: {
@@ -506,25 +516,15 @@ export async function POST(req: Request) {
     });
   }
 
-  try {
-    const response = await result.response;
-    const responseText = await result.text;
-    const hasVisibleText = responseText.trim().length > 0;
-    const hasResponseMessages = response.messages.length > 0;
-
-    if (!hasVisibleText && !hasResponseMessages) {
-      if (debugEnabled) logChatDebug("stream.empty-response-fallback", { modelId });
-      return createUIMessageStreamResponse({
-        stream: createEmptyResponseFallbackStream(EMPTY_PROVIDER_RESPONSE_MESSAGE),
-      });
-    }
-
-    return result.toUIMessageStreamResponse();
-  } catch (error) {
-    releaseGate();
-    if (debugEnabled) logChatDebug("stream.response-error", { message: getErrorMessage(error) });
-    return createUIMessageStreamResponse({
-      stream: createEmptyResponseFallbackStream(getProviderFailureMessage(error)),
-    });
-  }
+  // IMPORTANT: do NOT `await result.text` / `result.response` here. Those
+  // Promises only resolve once the entire stream has finished, which means
+  // the browser receives zero bytes for the whole duration of the
+  // orchestrator + sub-agent work. With sub-agents running 60-180s each,
+  // long requests would hold the connection silent for minutes and trip
+  // browser/proxy idle timeouts (observed 6-min crashes).
+  //
+  // Streaming starts immediately; provider errors after the initial
+  // setup are surfaced through `onError` (which writes the failure into
+  // the stream) and gate release happens in `onFinish` / `onError`.
+  return result.toUIMessageStreamResponse();
 }

@@ -1,34 +1,29 @@
-import { generateText, type LanguageModel } from "ai";
+import { generateText, streamText, type LanguageModel } from "ai";
 import { getGate } from "@/lib/llm/gate";
 import { getProviderForModelId, type ModelId } from "@/lib/llm/providers";
 
 /**
  * Sub-agent call hardening.
  *
- * Three knobs every sub-agent tool shares:
+ * Two execution paths, switched by `SUB_AGENT_USE_STREAMING`:
  *
- * - `maxRetries: 3` — with exponential backoff built into the AI SDK, this
- *   papers over transient 429/503 bursts when multiple users hit the same
- *   provider key. Bumped from `1` after observing multi-user RPM contention
- *   in production. Retries still respect the per-call `timeout` below, so a
- *   permanently unreachable upstream still fails within the configured
- *   wall-clock cap.
- * - Tiered `timeout` — wall-clock cap per sub-agent call.
- *     - `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s): generateVisualDesign,
- *       designStageFile in `generate_concepts` mode
- *     - `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s): validateStageFile,
- *       writeStageFile, designStageFile in `integrate_document` mode
- *   Heavy calls operate on accumulated documents whose prompts grow with
- *   each round; the previous flat 45s was insufficient once 3+ topic groups
- *   had been processed (sub-agent calls reliably hit network_timeout).
- *   `integrate_document` is heavy because the "二次回修" path re-runs it
- *   with prior selections + validation feedback merged into the prompt.
- *   Prevents the undici/provider socket from hanging indefinitely when a
- *   proxy or upstream stalls mid-stream.
- * - Provider-scoped concurrency gate — bounds the number of in-flight
- *   sub-agent calls per provider to `keyPoolSize × LLM_PER_KEY_CONCURRENCY`
- *   (default 3 per key). Extra work queues locally instead of bursting the
- *   provider and immediately eating 429s.
+ * - Streaming path (recommended, opt-in via env): uses `streamText` with the
+ *   AI SDK's native `chunkMs` (inter-chunk idle timeout). The model can take
+ *   as long as it wants overall, as long as it keeps emitting tokens — only
+ *   actual stalls trigger an abort. On idle abort, we retry once if the
+ *   remaining wall-clock budget can fit at least one more idle window.
+ * - Legacy path (default, fallback): uses `generateText` with a flat
+ *   wall-clock `timeout`. Kept for safe rollout — if some OpenAI-compat
+ *   provider buffers the entire response server-side and emits one chunk,
+ *   `chunkMs` is ineffective there and we want a known-good fallback.
+ *
+ * Concurrency gate (provider-scoped) and HTTP-level retries (`maxRetries`)
+ * apply to both paths. The streaming path lowers `maxRetries` to 2 so the
+ * SDK's internal retries don't starve our outer idle-retry budget.
+ *
+ * Errors are re-thrown — the AI SDK tool runtime converts that into a
+ * `tool-error` state for the Orchestrator, which already knows how to offer
+ * the user retry/skip options via its prompt.
  */
 
 export const SUB_AGENT_TIMEOUT_LIGHT_MS = 60_000;
@@ -36,26 +31,69 @@ export const SUB_AGENT_TIMEOUT_HEAVY_MS = 120_000;
 export const SUB_AGENT_TIMEOUT_MS = SUB_AGENT_TIMEOUT_LIGHT_MS;
 export const SUB_AGENT_MAX_RETRIES = 3;
 
+// Streaming path constants (only effective when SUB_AGENT_USE_STREAMING=1)
+export const SUB_AGENT_STREAMING_TIMEOUT_LIGHT_MS = 90_000;
+export const SUB_AGENT_STREAMING_TIMEOUT_HEAVY_MS = 180_000;
+export const SUB_AGENT_IDLE_LIGHT_MS = 40_000;
+export const SUB_AGENT_IDLE_HEAVY_MS = 60_000;
+export const SUB_AGENT_STREAMING_MAX_RETRIES = 2;
+
 type RunSubAgentArgs = {
   model: LanguageModel;
   modelId: ModelId;
   system: string;
   prompt: string;
+  /**
+   * Total wall-clock cap. In streaming mode this is the absolute ceiling;
+   * the actual abort is usually driven by `idleMs` instead.
+   */
   timeoutMs?: number;
+  /**
+   * Streaming mode only: max gap between two stream chunks before abort.
+   * Defaults are derived from `timeoutMs` magnitude.
+   */
+  idleMs?: number;
 };
 
+function isStreamingEnabled(): boolean {
+  return process.env.SUB_AGENT_USE_STREAMING === "1";
+}
+
+function deriveStreamingBudget(timeoutMs: number): {
+  totalMs: number;
+  idleMs: number;
+} {
+  // Map the caller's "intent" (light/heavy) onto streaming-path budgets:
+  //   timeoutMs >= 120s (heavy intent) → 180s total / 60s idle
+  //   timeoutMs >= 60s  (light intent) → 90s total / 40s idle
+  //   smaller values are respected literally so tests / unusual callers can
+  //   request tight budgets without being silently upgraded.
+  if (timeoutMs >= SUB_AGENT_TIMEOUT_HEAVY_MS) {
+    return {
+      totalMs: SUB_AGENT_STREAMING_TIMEOUT_HEAVY_MS,
+      idleMs: SUB_AGENT_IDLE_HEAVY_MS,
+    };
+  }
+  if (timeoutMs >= SUB_AGENT_TIMEOUT_LIGHT_MS) {
+    return {
+      totalMs: SUB_AGENT_STREAMING_TIMEOUT_LIGHT_MS,
+      idleMs: SUB_AGENT_IDLE_LIGHT_MS,
+    };
+  }
+  return {
+    totalMs: timeoutMs,
+    idleMs: Math.min(SUB_AGENT_IDLE_LIGHT_MS, timeoutMs),
+  };
+}
+
 /**
- * Wrapper around `generateText` that applies shared timeout/retry/gate
- * policy and normalizes low-level network errors into Chinese, user-facing
- * messages the Orchestrator can reason about.
+ * Wrapper around `generateText` / `streamText` that applies shared
+ * timeout/retry/gate policy and normalizes low-level network errors into
+ * Chinese, user-facing messages the Orchestrator can reason about.
  *
  * `timeoutMs` defaults to `SUB_AGENT_TIMEOUT_LIGHT_MS` (60s) for concept
  * generation. Heavy tools (validate/write) that operate on accumulated
  * documents should pass `SUB_AGENT_TIMEOUT_HEAVY_MS` (120s).
- *
- * Errors are re-thrown — the AI SDK tool runtime converts that into a
- * `tool-error` state for the Orchestrator, which already knows how to offer
- * the user retry/skip options via its prompt.
  */
 export async function runSubAgentText({
   model,
@@ -63,7 +101,27 @@ export async function runSubAgentText({
   system,
   prompt,
   timeoutMs = SUB_AGENT_TIMEOUT_LIGHT_MS,
+  idleMs,
 }: RunSubAgentArgs): Promise<string> {
+  if (isStreamingEnabled()) {
+    return runViaStreaming({ model, modelId, system, prompt, timeoutMs, idleMs });
+  }
+  return runViaGenerateText({ model, modelId, system, prompt, timeoutMs });
+}
+
+async function runViaGenerateText({
+  model,
+  modelId,
+  system,
+  prompt,
+  timeoutMs,
+}: {
+  model: LanguageModel;
+  modelId: ModelId;
+  system: string;
+  prompt: string;
+  timeoutMs: number;
+}): Promise<string> {
   const gate = getGate(getProviderForModelId(modelId));
   try {
     return await gate.run(async () => {
@@ -81,25 +139,122 @@ export async function runSubAgentText({
   }
 }
 
+async function runViaStreaming({
+  model,
+  modelId,
+  system,
+  prompt,
+  timeoutMs,
+  idleMs,
+}: {
+  model: LanguageModel;
+  modelId: ModelId;
+  system: string;
+  prompt: string;
+  timeoutMs: number;
+  idleMs?: number;
+}): Promise<string> {
+  const derived = deriveStreamingBudget(timeoutMs);
+  const totalMs = derived.totalMs;
+  const effectiveIdle = idleMs ?? derived.idleMs;
+
+  const gate = getGate(getProviderForModelId(modelId));
+  const start = Date.now();
+
+  const attempt = (budget: number) =>
+    gate.run(() =>
+      streamOnce({
+        model,
+        system,
+        prompt,
+        totalMs: budget,
+        idleMs: effectiveIdle,
+      })
+    );
+
+  try {
+    return await attempt(totalMs);
+  } catch (err) {
+    const elapsed = Date.now() - start;
+    const remaining = totalMs - elapsed;
+    if (isIdleAbort(err) && remaining > effectiveIdle * 2) {
+      try {
+        return await attempt(remaining);
+      } catch (err2) {
+        throw new Error(classifySubAgentError(err2, totalMs, effectiveIdle));
+      }
+    }
+    throw new Error(classifySubAgentError(err, totalMs, effectiveIdle));
+  }
+}
+
+async function streamOnce(args: {
+  model: LanguageModel;
+  system: string;
+  prompt: string;
+  totalMs: number;
+  idleMs: number;
+}): Promise<string> {
+  const result = streamText({
+    model: args.model,
+    system: args.system,
+    prompt: args.prompt,
+    maxRetries: SUB_AGENT_STREAMING_MAX_RETRIES,
+    timeout: { totalMs: args.totalMs, chunkMs: args.idleMs },
+  });
+
+  let buf = "";
+  for await (const delta of result.textStream) {
+    buf += delta;
+  }
+
+  if (buf.length === 0) {
+    throw new Error(
+      "[empty_response] 子 Agent 返回空内容（可能触发了内容过滤或上游异常）。请重试，或换一个模型。"
+    );
+  }
+  return buf;
+}
+
+function isIdleAbort(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  if (m.includes("aborted")) return true;
+  if (m.includes("chunk") && m.includes("timeout")) return true;
+  if (m.includes("idle")) return true;
+  return false;
+}
+
 /**
  * Map raw provider/network errors to a short Chinese label plus a
  * machine-matchable prefix like `[network_timeout]`. The prefix lets the
  * Orchestrator prompt (or future code) branch on error kind without parsing
  * free-form English stack traces.
+ *
+ * `idleMs` is included only when the streaming path is active; in that case
+ * the timeout message describes inter-chunk stalling instead of total
+ * wall-clock exhaustion.
  */
 export function classifySubAgentError(
   error: unknown,
-  timeoutMs: number = SUB_AGENT_TIMEOUT_LIGHT_MS
+  timeoutMs: number = SUB_AGENT_TIMEOUT_LIGHT_MS,
+  idleMs?: number
 ): string {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
+
+  // Pre-classified errors thrown by streamOnce — pass through unchanged.
+  if (raw.startsWith("[empty_response]")) return raw;
 
   if (
     lower.includes("etimedout") ||
     lower.includes("connect timeout") ||
     lower.includes("timed out") ||
-    lower.includes("aborted") && lower.includes("timeout")
+    (lower.includes("aborted") && lower.includes("timeout")) ||
+    (idleMs != null && (lower.includes("aborted") || lower.includes("idle") || lower.includes("chunk")))
   ) {
+    if (idleMs != null) {
+      return `[network_timeout] 子 Agent 流式响应停滞（${idleMs / 1000}s 内无新内容，总预算 ${timeoutMs / 1000}s）。可能是网络中断或代理掉链。`;
+    }
     return `[network_timeout] 子 Agent 调用超时（${timeoutMs / 1000}s 内未返回）。可能是当前网络不能直连该模型供应商，或代理不稳定。`;
   }
   if (

@@ -234,6 +234,9 @@ npm run test:e2e
 ### 调试 LLM 调用
 请求时带上 header `x-chat-debug: 1`，或设置 `CHAT_DEBUG=1` 环境变量，服务端会打印详细日志（包含 `modelId` 字段方便排查走错供应商）。
 
+### 子 Agent 流式调用（应对 Kimi 等慢上游）
+默认子 Agent 走 `generateText` + 60s/120s 墙钟。Kimi 在长 prompt 下首 token 慢、但持续吐字稳定，会触发 `[network_timeout]`。设置 `SUB_AGENT_USE_STREAMING=1` 切换到 `streamText` + chunkMs 空闲超时（40s/60s 无新 token 才 abort），单次 idle 重试，总墙钟提升到 90s/180s 兜底。逻辑集中在 [src/app/api/chat/tools/shared.ts](src/app/api/chat/tools/shared.ts)。
+
 ---
 
 ## 待办 / 已知限制
