@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { useArtifactStore } from "@/store/useArtifactStore";
 import { useSetupStore } from "@/store/useSetupStore";
 import { useModelStore } from "@/store/useModelStore";
-import { useConversationStore } from "@/store/useConversationStore";
+import { dedupeMessagesById, useConversationStore } from "@/store/useConversationStore";
 import { ArrowUp, AtSign, Paperclip, X } from "lucide-react";
 import { ApprovalBar } from "@/components/workspace/ApprovalBar";
 import { ProgressRail } from "@/components/workspace/ProgressRail";
@@ -107,7 +107,12 @@ function ChatSession({ sessionId, className }: ChatSessionProps) {
 
   const initialMessages = useMemo<UIMessage[]>(
     () =>
-      useConversationStore.getState().sessions[sessionId]?.messages ?? [],
+      // Dedupe defensively in case the persisted messages contain duplicate
+      // ids from a buggy prior version. Mirrors the same dedup that
+      // setMessages now applies on writes.
+      dedupeMessagesById(
+        useConversationStore.getState().sessions[sessionId]?.messages ?? []
+      ),
     [sessionId]
   );
 
@@ -120,6 +125,9 @@ function ChatSession({ sessionId, className }: ChatSessionProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 守卫：保证每个 ChatSession 实例（每个 sessionId）最多消费一次 initialPrompt。
+  // 防止 React StrictMode 下 effect 双跑导致的重复 sendMessage。
+  const initialPromptConsumedRef = useRef(false);
   const addArtifact = useArtifactStore((s) => s.addArtifact);
   const setActiveArtifact = useArtifactStore((s) => s.setActiveArtifact);
   const { initialPrompt, clearInitialPrompt } = useSetupStore();
@@ -169,7 +177,11 @@ function ChatSession({ sessionId, className }: ChatSessionProps) {
   }, [sessionId, messages]);
 
   useEffect(() => {
+    if (initialPromptConsumedRef.current) return;
     if (!initialPrompt || messages.length > 0 || isLoading) return;
+    // 标记必须先于 clearInitialPrompt() / sendMessage()，避免 StrictMode 下
+    // 同一 effect 函数体的二次执行重复触发请求。
+    initialPromptConsumedRef.current = true;
     const prompt = initialPrompt;
     clearInitialPrompt();
     sendMessage({ text: prompt });

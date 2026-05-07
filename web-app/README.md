@@ -2,6 +2,11 @@
 
 基于 Next.js + Vercel AI SDK 的多智能体关卡设计 Web 应用，采用 `Chat + Artifacts` 双栏布局。左侧负责与 Orchestrator 对话，右侧展示概念方案、验证报告、设计文档和视觉提示词等工件。
 
+## 使用说明
+
+- 面向第一次使用 AI 工具的普通用户：[docs/普通用户使用说明.md](docs/普通用户使用说明.md)
+- 面向关卡策划师的进阶流程说明：[docs/关卡策划师上手指南.md](docs/关卡策划师上手指南.md)
+
 ## 已实现能力
 
 - 主控 Orchestrator 通过 `/api/chat` 调度 4 个子工具

@@ -126,4 +126,45 @@ describe("useConversationStore", () => {
   it("getActiveMessages returns [] when no active session", () => {
     expect(useConversationStore.getState().getActiveMessages()).toEqual([]);
   });
+
+  describe("setMessages id deduplication", () => {
+    it("removes duplicate-id messages (keeping the last occurrence) before persisting", () => {
+      const id = useConversationStore.getState().createSession();
+      const msgs: UIMessage[] = [
+        textMessage("user", "dup-1", "first version"),
+        textMessage("assistant", "uniq-1", "ack"),
+        textMessage("user", "dup-1", "second version (later, kept)"),
+        textMessage("assistant", "uniq-2", "more"),
+      ];
+
+      useConversationStore.getState().setMessages(id, msgs);
+
+      const stored = useConversationStore.getState().sessions[id]!.messages;
+      expect(stored.length).toBe(3);
+      // The duplicate id "dup-1" should appear only once
+      const dupCount = stored.filter((m) => m.id === "dup-1").length;
+      expect(dupCount).toBe(1);
+      // And the kept occurrence should be the LATER one (newest content)
+      const dup = stored.find((m) => m.id === "dup-1")!;
+      const dupText = dup.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join("");
+      expect(dupText).toContain("second version");
+      // Relative order of remaining messages must be preserved
+      expect(stored.map((m) => m.id)).toEqual(["uniq-1", "dup-1", "uniq-2"]);
+    });
+
+    it("is a no-op when all message ids are unique", () => {
+      const id = useConversationStore.getState().createSession();
+      const msgs: UIMessage[] = [
+        textMessage("user", "a", "x"),
+        textMessage("assistant", "b", "y"),
+        textMessage("user", "c", "z"),
+      ];
+      useConversationStore.getState().setMessages(id, msgs);
+      const stored = useConversationStore.getState().sessions[id]!.messages;
+      expect(stored.map((m) => m.id)).toEqual(["a", "b", "c"]);
+    });
+  });
 });

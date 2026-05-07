@@ -2,8 +2,11 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle, ShieldCheck, ShieldAlert } from "lucide-react";
-import type { ValidationReport } from "@/lib/chat/artifactParser";
+import { AlertTriangle, CheckCircle2, ShieldCheck, ShieldAlert } from "lucide-react";
+import type {
+  DimensionScore,
+  ValidationReport,
+} from "@/lib/chat/artifactParser";
 import { SectionLabel } from "@/components/workspace/primitives/SectionLabel";
 
 interface ValidationArtifactProps {
@@ -22,7 +25,8 @@ interface Conclusion {
 }
 
 function getConclusionVisual(report: ValidationReport): Conclusion {
-  const passCount = Math.max(
+  const failingCount = report.dimensions.filter((d) => !d.passed).length;
+  const fallbackCount = Math.max(
     0,
     Math.max(report.suggestions.length, report.risks.length, 0)
   );
@@ -40,11 +44,12 @@ function getConclusionVisual(report: ValidationReport): Conclusion {
     };
   }
   if (report.conclusion === "不通过，需修改") {
+    const detected = failingCount > 0 ? failingCount : report.risks.length;
     return {
       title: "需修改后重新验证",
       subtitle:
-        report.risks.length > 0
-          ? `检测到 ${report.risks.length} 项阻塞，请按建议修订`
+        detected > 0
+          ? `检测到 ${detected} 项扣分维度，请按建议修订`
           : "存在阻塞性偏差，请按建议修订",
       icon: ShieldAlert,
       bg: "var(--danger-soft)",
@@ -55,8 +60,8 @@ function getConclusionVisual(report: ValidationReport): Conclusion {
   return {
     title: "需要人工判断",
     subtitle:
-      passCount > 0
-        ? `自动验证不确定，请人工复核 ${passCount} 项`
+      fallbackCount > 0
+        ? `自动验证不确定，请人工复核 ${fallbackCount} 项`
         : "自动验证未给出明确结论，请人工复核",
     icon: AlertTriangle,
     bg: "var(--accent-soft)",
@@ -102,6 +107,11 @@ function StatStrip({ passCount, warnCount, blockCount }: StatStripProps) {
   );
 }
 
+/** Dimensions whose score did not reach the maximum — the real "items to fix". */
+function getFailingDimensions(report: ValidationReport): DimensionScore[] {
+  return report.dimensions.filter((d) => !d.passed);
+}
+
 export function ValidationArtifact({
   report,
   rawContent,
@@ -110,15 +120,28 @@ export function ValidationArtifact({
   const visual = getConclusionVisual(report);
   const ConclusionIcon = visual.icon;
 
-  // Heuristic stat counts: blocks come from risks, warnings from suggestions,
-  // passes inferred from total minus those.
-  const blockCount =
-    report.conclusion === "不通过，需修改" ? report.risks.length : 0;
-  const warnCount =
-    report.conclusion === "不通过，需修改"
-      ? Math.max(report.risks.length - blockCount, 0)
-      : report.risks.length;
-  const passCount = report.conclusion === "通过" ? Math.max(6 - warnCount, 4) : 0;
+  const failingDimensions = getFailingDimensions(report);
+  const hasDimensionData = report.dimensions.length > 0;
+
+  // Counts derived from the actual scoring table when available; fall back
+  // to the legacy heuristic only when the report has no dimension rows.
+  let passCount: number;
+  let warnCount: number;
+  let blockCount: number;
+  if (hasDimensionData) {
+    passCount = report.dimensions.filter((d) => d.passed).length;
+    // Treat a score of 0 as "blocked" and any other partial score as "warning".
+    blockCount = failingDimensions.filter((d) => d.scoreValue === 0).length;
+    warnCount = failingDimensions.length - blockCount;
+  } else {
+    blockCount =
+      report.conclusion === "不通过，需修改" ? report.risks.length : 0;
+    warnCount =
+      report.conclusion === "不通过，需修改"
+        ? Math.max(report.risks.length - blockCount, 0)
+        : report.risks.length;
+    passCount = report.conclusion === "通过" ? Math.max(6 - warnCount, 4) : 0;
+  }
 
   return (
     <div data-testid={testId} className="flex flex-col gap-4">
@@ -163,8 +186,10 @@ export function ValidationArtifact({
         />
       </div>
 
-      {/* Two-column: risks / suggestions */}
-      {(report.risks.length > 0 || report.suggestions.length > 0) ? (
+      {/* Two-column: per-dimension scoring / suggestions */}
+      {(hasDimensionData ||
+        report.risks.length > 0 ||
+        report.suggestions.length > 0) ? (
         <div className="grid gap-3 md:grid-cols-[1.1fr_1fr]">
           <div
             className="rounded-2xl p-4"
@@ -174,7 +199,82 @@ export function ValidationArtifact({
             }}
           >
             <SectionLabel className="mb-3">逐项校验</SectionLabel>
-            {report.risks.length > 0 ? (
+            {hasDimensionData ? (
+              failingDimensions.length > 0 ? (
+                <ul className="flex flex-col gap-2">
+                  {failingDimensions.map((dim) => {
+                    const isBlocked = dim.scoreValue === 0;
+                    const tone = isBlocked
+                      ? {
+                          bg: "var(--danger-soft)",
+                          ink: "var(--danger-ink)",
+                        }
+                      : {
+                          bg: "var(--accent-soft)",
+                          ink: "var(--accent-ink)",
+                        };
+                    return (
+                      <li
+                        key={dim.name}
+                        className="flex items-start gap-2.5 rounded-lg px-2 py-1.5"
+                      >
+                        <span
+                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                          style={{ background: tone.bg }}
+                        >
+                          <AlertTriangle
+                            className="h-3 w-3"
+                            style={{ color: tone.ink }}
+                          />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="text-[12px] font-semibold"
+                              style={{ color: "var(--fg-primary)" }}
+                            >
+                              {dim.name}
+                            </span>
+                            <span
+                              className="font-mono text-[11px] tabular-nums"
+                              style={{ color: tone.ink }}
+                            >
+                              {dim.score}
+                            </span>
+                          </div>
+                          {dim.description ? (
+                            <p
+                              className="mt-0.5 text-[11px] leading-5"
+                              style={{ color: "var(--fg-secondary)" }}
+                            >
+                              {dim.description}
+                            </p>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
+                  <span
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                    style={{ background: "var(--success-soft)" }}
+                  >
+                    <CheckCircle2
+                      className="h-3 w-3"
+                      style={{ color: "var(--success-ink)" }}
+                    />
+                  </span>
+                  <span
+                    className="text-[12px] leading-6"
+                    style={{ color: "var(--fg-secondary)" }}
+                  >
+                    所有维度均为满分，无扣分项。
+                  </span>
+                </div>
+              )
+            ) : report.risks.length > 0 ? (
               <ul className="flex flex-col gap-2">
                 {report.risks.map((risk, idx) => (
                   <li

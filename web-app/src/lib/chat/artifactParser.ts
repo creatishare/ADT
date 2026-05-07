@@ -31,9 +31,34 @@ export interface ArtifactMetrics {
   tables: number;
 }
 
+export interface DimensionScore {
+  /** Dimension name with bold/whitespace stripped, e.g. "非魔法性". */
+  name: string;
+  /** Original score string as written, e.g. "5/5". */
+  score: string;
+  /** Numerator parsed from score (the achieved points). */
+  scoreValue: number;
+  /** Denominator parsed from score (the maximum points). */
+  maxScore: number;
+  /** True only when scoreValue === maxScore — strict full-score check. */
+  passed: boolean;
+  /** Free-text rationale from the report's "说明" column. */
+  description: string;
+}
+
 export interface ValidationReport {
   conclusion: "通过" | "不通过，需修改" | "待人工判断";
   suggestions: string[];
+  /**
+   * Per-dimension scoring extracted from the report's "### 评分明细" table.
+   * UI components should iterate over this (filtering by `!passed`) instead
+   * of relying on the legacy `risks` array.
+   */
+  dimensions: DimensionScore[];
+  /**
+   * Legacy free-text bullets retained for backwards compatibility; new UI
+   * should prefer `dimensions`.
+   */
   risks: string[];
 }
 
@@ -106,6 +131,59 @@ export function getArtifactSummary(title: string): string {
   return "由子智能体生成的结构化工件内容。";
 }
 
+function stripMarkdownEmphasis(text: string): string {
+  // Removes surrounding **bold**, *italic*, __bold__, _italic_ pairs.
+  return text.replace(/[*_]+/g, "").trim();
+}
+
+function isTableRow(line: string): boolean {
+  return line.startsWith("|") && line.endsWith("|");
+}
+
+function isSeparatorRow(line: string): boolean {
+  // Markdown table separator like |---|---|---| or |:---:|---:|
+  return /^\|[\s\-:|]+\|$/.test(line);
+}
+
+function parseDimensionsTable(content: string): DimensionScore[] {
+  // Locate the "### 评分明细" block and stop at the next "###" heading or EOF.
+  const block = content.match(/###\s*评分明细([\s\S]*?)(?:\n###\s|\n##\s|$)/)?.[1];
+  if (!block) return [];
+  const dims: DimensionScore[] = [];
+  for (const rawLine of block.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!isTableRow(line)) continue;
+    if (isSeparatorRow(line)) continue;
+    // Drop the leading and trailing pipe, then split.
+    const cells = line
+      .slice(1, -1)
+      .split("|")
+      .map((cell) => stripMarkdownEmphasis(cell));
+    if (cells.length < 3) continue;
+    const [name, score, ...rest] = cells;
+    if (!name || !score) continue;
+    // Skip the header row.
+    if (name === "维度" || /^Dimension$/i.test(name)) continue;
+    const scoreMatch = score.match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (!scoreMatch) continue;
+    const scoreValue = Number(scoreMatch[1]);
+    const maxScore = Number(scoreMatch[2]);
+    if (!Number.isFinite(scoreValue) || !Number.isFinite(maxScore) || maxScore <= 0) {
+      continue;
+    }
+    const description = rest.join(" | ").trim();
+    dims.push({
+      name,
+      score,
+      scoreValue,
+      maxScore,
+      passed: scoreValue === maxScore,
+      description,
+    });
+  }
+  return dims;
+}
+
 export function parseValidationReport(content: string): ValidationReport {
   let conclusion: ValidationReport["conclusion"];
   if (content.includes("不通过") || content.includes("需修改")) {
@@ -124,15 +202,16 @@ export function parseValidationReport(content: string): ValidationReport {
     .filter((line) => /^\d+\./.test(line))
     .slice(0, 5);
 
-  const risks: string[] = [
-    content.includes("魔法") ? "出现魔法相关表述，需重点复核" : null,
-    content.includes("不通过")
-      ? "当前方案存在阻断项，不建议直接进入下游文档环节"
-      : null,
-    content.includes("适合8-12岁") ? "已覆盖目标年龄适配性审查" : null,
-  ].filter((x): x is string => x !== null);
+  const dimensions = parseDimensionsTable(content);
 
-  return { conclusion, suggestions, risks };
+  // Legacy `risks` is now derived from real dimension scoring instead of
+  // hard-coded keyword matches, so the UI no longer surfaces misleading
+  // "watch-list" items unrelated to this run.
+  const risks: string[] = dimensions
+    .filter((d) => !d.passed)
+    .map((d) => `${d.name} ${d.score}：${d.description}`);
+
+  return { conclusion, suggestions, dimensions, risks };
 }
 
 export function parsePromptArtifact(content: string): PromptArtifact {

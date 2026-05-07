@@ -6,6 +6,14 @@ import { useArtifactStore, type Artifact } from "@/store/useArtifactStore";
 import { useConversationStore } from "@/store/useConversationStore";
 import { SessionSwitcher } from "@/components/workspace/SessionSwitcher";
 import { UploadCard } from "@/components/setup/UploadCard";
+import { ModeSelector } from "@/components/setup/ModeSelector";
+import { GroupPicker } from "@/components/setup/GroupPicker";
+import { parseLessonGroups } from "@/lib/setup/parseLessonGroups";
+import {
+  buildInitialPrompt,
+  type PlanningMode,
+  type UploadedDoc,
+} from "@/lib/setup/buildInitialPrompt";
 
 const EMPTY_ARTIFACTS: readonly Artifact[] = Object.freeze([]);
 import {
@@ -23,11 +31,6 @@ import {
 } from "lucide-react";
 import { formatTimestamp } from "@/lib/chat/artifactParser";
 
-interface UploadedDoc {
-  name: string;
-  content: string;
-}
-
 function readTextFile(
   file: File,
   onResult: (doc: UploadedDoc) => void
@@ -40,24 +43,25 @@ function readTextFile(
   reader.readAsText(file);
 }
 
-function buildInitialPrompt(worldDoc: UploadedDoc, lessonDoc: UploadedDoc) {
-  return `请根据以下资料开始关卡设计流程。
+interface StartDisabledInput {
+  planningMode: PlanningMode;
+  worldDoc: UploadedDoc | null;
+  lessonDoc: UploadedDoc | null;
+  shellDoc: UploadedDoc | null;
+  selectedGroupIndex: number | null;
+}
 
-## 阶段世界观文档
-文件名：${worldDoc.name}
-
-\`\`\`
-${worldDoc.content}
-\`\`\`
-
-## 课节知识点整理文档
-文件名：${lessonDoc.name}
-
-\`\`\`
-${lessonDoc.content}
-\`\`\`
-
-请按照7步法工作流，从第一个题组开始，依次生成各题组的核心包装概念。请先针对第一个题组生成5个候选概念供我筛选。`;
+function computeStartDisabled({
+  planningMode,
+  worldDoc,
+  lessonDoc,
+  shellDoc,
+  selectedGroupIndex,
+}: StartDisabledInput): boolean {
+  if (!worldDoc || !lessonDoc) return true;
+  if (planningMode === "single-group" && selectedGroupIndex == null) return true;
+  if (planningMode === "integration" && !shellDoc) return true;
+  return false;
 }
 
 function buildDownloadBlob(
@@ -100,8 +104,17 @@ export function SetupSidebar() {
     toggleCollapse,
     worldDoc,
     lessonDoc,
+    shellDoc,
+    planningMode,
+    parsedGroups,
+    selectedGroupIndex,
+    initialPrompt,
     setWorldDoc,
     setLessonDoc,
+    setShellDoc,
+    setPlanningMode,
+    setParsedGroups,
+    setSelectedGroupIndex,
     setInitialPrompt,
   } = useSetupStore();
   const activeSessionId = useConversationStore((s) => s.activeSessionId);
@@ -113,6 +126,7 @@ export function SetupSidebar() {
   const deleteArtifact = useArtifactStore((s) => s.deleteArtifact);
   const worldInputRef = useRef<HTMLInputElement>(null);
   const lessonInputRef = useRef<HTMLInputElement>(null);
+  const shellInputRef = useRef<HTMLInputElement>(null);
 
   const [outputsExpanded, setOutputsExpanded] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -129,13 +143,76 @@ export function SetupSidebar() {
   const handleLessonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    readTextFile(file, setLessonDoc);
+    readTextFile(file, (doc) => {
+      setLessonDoc(doc);
+      const groups = parseLessonGroups(doc.content);
+      setParsedGroups(groups);
+      // 重置选中题组：避免上传新文档时残留旧选项
+      setSelectedGroupIndex(null);
+    });
     if (lessonInputRef.current) lessonInputRef.current.value = "";
   };
 
+  const handleShellUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    readTextFile(file, setShellDoc);
+    if (shellInputRef.current) shellInputRef.current.value = "";
+  };
+
+  const handleModeChange = (next: PlanningMode) => {
+    if (next === planningMode) return;
+    const convo = useConversationStore.getState();
+    const active = convo.activeSessionId;
+    const hasOngoing =
+      active && (convo.sessions[active]?.messages.length ?? 0) > 0;
+    if (hasOngoing) {
+      const ok = window.confirm(
+        "切换策划模式将开启一个新会话（当前会话保留在历史中）。是否继续？"
+      );
+      if (!ok) return;
+      convo.createSession({
+        docsSnapshot: {
+          worldDocName: worldDoc?.name,
+          lessonDocName: lessonDoc?.name,
+          shellDocName: shellDoc?.name,
+          planningMode: next,
+        },
+      });
+    }
+    setPlanningMode(next);
+    // 切换模式时清掉与目标模式无关的状态，避免误用
+    if (next !== "single-group") setSelectedGroupIndex(null);
+    if (next !== "integration") setShellDoc(null);
+  };
+
+  // initialPrompt 不为空说明上一次点击触发的 prompt 还没被 ChatSession 消费，
+  // 此时按钮立即灰掉，防止用户连点导致重复 createSession + 重复 sendMessage。
+  const hasPendingPrompt = initialPrompt !== null;
+
+  const startDisabled =
+    hasPendingPrompt ||
+    computeStartDisabled({
+      planningMode,
+      worldDoc,
+      lessonDoc,
+      shellDoc,
+      selectedGroupIndex,
+    });
+
   const handleStartPlanning = () => {
+    if (startDisabled) return;
     if (!worldDoc || !lessonDoc) return;
-    const prompt = buildInitialPrompt(worldDoc, lessonDoc);
+    // 二次防御：直接读最新 store，避免 React 状态批处理窗口内的 race。
+    if (useSetupStore.getState().initialPrompt !== null) return;
+    const prompt = buildInitialPrompt({
+      mode: planningMode,
+      worldDoc,
+      lessonDoc,
+      parsedGroups,
+      selectedGroupIndex,
+      shellDoc,
+    });
     const convo = useConversationStore.getState();
     const active = convo.activeSessionId;
     const shouldCreateNew =
@@ -146,6 +223,9 @@ export function SetupSidebar() {
         docsSnapshot: {
           worldDocName: worldDoc.name,
           lessonDocName: lessonDoc.name,
+          shellDocName: shellDoc?.name,
+          planningMode,
+          selectedGroupIndex,
         },
       });
     }
@@ -211,7 +291,6 @@ export function SetupSidebar() {
     );
   }
 
-  const startDisabled = !worldDoc || !lessonDoc;
 
   return (
     <div
@@ -242,6 +321,8 @@ export function SetupSidebar() {
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
         <SessionSwitcher />
 
+        <ModeSelector value={planningMode} onChange={handleModeChange} />
+
         <UploadCard
           step="STEP 01"
           title="阶段世界观"
@@ -258,12 +339,40 @@ export function SetupSidebar() {
           description="当前课节的知识点整理文档"
           doc={lessonDoc}
           onUpload={handleLessonUpload}
-          onClear={() => setLessonDoc(null)}
+          onClear={() => {
+            setLessonDoc(null);
+            setParsedGroups([]);
+            setSelectedGroupIndex(null);
+          }}
           inputRef={lessonInputRef}
         />
 
+        {planningMode === "single-group" ? (
+          <GroupPicker
+            groups={parsedGroups}
+            value={selectedGroupIndex}
+            onChange={setSelectedGroupIndex}
+            lessonReady={Boolean(lessonDoc)}
+          />
+        ) : null}
+
+        {planningMode === "integration" ? (
+          <div data-testid="shell-upload-slot">
+            <UploadCard
+              step="STEP 03"
+              title="壳子方案文档"
+              description="用户已为各题组想好的壳子方案 .md / .txt"
+              doc={shellDoc}
+              onUpload={handleShellUpload}
+              onClear={() => setShellDoc(null)}
+              inputRef={shellInputRef}
+            />
+          </div>
+        ) : null}
+
         <button
           type="button"
+          data-testid="start-planning-button"
           disabled={startDisabled}
           onClick={handleStartPlanning}
           className="inline-flex items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-[12px] font-semibold transition-colors disabled:cursor-not-allowed"

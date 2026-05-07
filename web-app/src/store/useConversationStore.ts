@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { UIMessage } from "ai";
+import type { PlanningMode } from "@/lib/setup/buildInitialPrompt";
 
 const STORAGE_KEY = "agent-designer-conversations";
 const STORE_VERSION = 1;
@@ -12,6 +13,9 @@ const FALLBACK_KEEP_LAST = 10;
 export interface DocsSnapshot {
   worldDocName?: string;
   lessonDocName?: string;
+  shellDocName?: string;
+  planningMode?: PlanningMode;
+  selectedGroupIndex?: number | null;
 }
 
 export interface ConversationSession {
@@ -86,6 +90,25 @@ function trimMessages(messages: UIMessage[]): UIMessage[] {
     return current.slice(-FALLBACK_KEEP_LAST);
   }
   return current;
+}
+
+/**
+ * Drop messages with duplicate ids, keeping the LAST occurrence (the newest
+ * snapshot during streaming). Preserves the relative order of survivors.
+ *
+ * Why: the AI SDK's `useChat` may transiently emit two messages with the
+ * same id during state transitions, and prior buggy versions of this app
+ * may have persisted such pairs to localStorage. Letting them flow into
+ * `messages.map(m => <div key={m.id}>...)` triggers the React duplicate-key
+ * warning. Dedupe here so future writes self-heal old data.
+ */
+export function dedupeMessagesById<T extends { id: string }>(messages: T[]): T[] {
+  if (messages.length < 2) return messages;
+  const lastIndexById = new Map<string, number>();
+  messages.forEach((m, idx) => lastIndexById.set(m.id, idx));
+  // Quick exit if no duplicates: every id maps to its own index.
+  if (lastIndexById.size === messages.length) return messages;
+  return messages.filter((m, idx) => lastIndexById.get(m.id) === idx);
 }
 
 function pruneOldSessions(
@@ -212,10 +235,13 @@ export const useConversationStore = create<ConversationStore>()(
         set((state) => {
           const session = state.sessions[id];
           if (!session) return state;
-          const trimmed = trimMessages(messages);
+          // Dedupe by id BEFORE trimming so the byte-budget calculation
+          // doesn't waste room on duplicates we'll discard anyway.
+          const deduped = dedupeMessagesById(messages);
+          const trimmed = trimMessages(deduped);
           const autoName =
-            session.name.startsWith("新策划 ") && messages.length > 0
-              ? deriveNameFromMessages(messages) ?? session.name
+            session.name.startsWith("新策划 ") && deduped.length > 0
+              ? deriveNameFromMessages(deduped) ?? session.name
               : session.name;
           const nextSession: ConversationSession = {
             ...session,

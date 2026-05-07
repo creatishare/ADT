@@ -31,7 +31,13 @@ import { logChatDebug } from "@/lib/chat/debug";
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
 
-type ChatTestScenario = "success" | "approval" | "tool-error" | "request-error";
+type ChatTestScenario =
+  | "success"
+  | "approval"
+  | "tool-error"
+  | "request-error"
+  | "single-group-success"
+  | "integration-success";
 
 type ChatTestToolPart = {
   type: "dynamic-tool";
@@ -58,7 +64,7 @@ type ChatTestResponse = {
 const CHAT_TEST_MODE_HEADER = "x-chat-test-mode";
 const CHAT_TEST_SCENARIO_HEADER = "x-chat-test-scenario";
 const CHAT_TEST_SCENARIO_MARKER =
-  /\[test-scenario:(success|approval|tool-error|request-error)\]/i;
+  /\[test-scenario:(success|approval|tool-error|request-error|single-group-success|integration-success)\]/i;
 const CHAT_DEBUG_HEADER = "x-chat-debug";
 const MODEL_ID_HEADER = "x-model-id";
 
@@ -155,14 +161,25 @@ function buildChatTestModeStream(response: ChatTestResponse) {
   });
 }
 
+function isChatTestScenario(value: string | null | undefined): value is ChatTestScenario {
+  return (
+    value === "success" ||
+    value === "approval" ||
+    value === "tool-error" ||
+    value === "request-error" ||
+    value === "single-group-success" ||
+    value === "integration-success"
+  );
+}
+
 function getChatTestScenario(req: Request, requestMessages: RequestMessage[]): ChatTestScenario {
   const fromHeader = req.headers.get(CHAT_TEST_SCENARIO_HEADER);
-  if (fromHeader === "success" || fromHeader === "approval" || fromHeader === "tool-error" || fromHeader === "request-error") {
+  if (isChatTestScenario(fromHeader)) {
     return fromHeader;
   }
   const transcript = buildTranscript(requestMessages);
-  const fromMarker = transcript.match(CHAT_TEST_SCENARIO_MARKER)?.[1];
-  if (fromMarker === "success" || fromMarker === "approval" || fromMarker === "tool-error" || fromMarker === "request-error") {
+  const fromMarker = transcript.match(CHAT_TEST_SCENARIO_MARKER)?.[1]?.toLowerCase();
+  if (isChatTestScenario(fromMarker)) {
     return fromMarker;
   }
   return "success";
@@ -175,6 +192,78 @@ function isE2ETestMode(req: Request) {
 function isChatDebugMode(req: Request) {
   return process.env.CHAT_DEBUG === "1" || req.headers.get(CHAT_DEBUG_HEADER) === "1";
 }
+
+/**
+ * 单题组模式产物：模拟 writeStageFile 在 [mode:single-group] 下的输出。
+ * 关键特征：
+ * - 只含 1 个题组的详情；无"前置剧情衔接 / 后置剧情衔接"段落。
+ * - 仍带"舞台区效果描述 / 代码-舞台映射 / 可替换效果类型"。
+ */
+const SINGLE_GROUP_DOC = [
+  "# 关卡设计介绍文档",
+  "",
+  "## 1. 关卡设计总览表",
+  "",
+  "| 题组 | courseCode | 核心知识点 | 舞台区效果类型 | 视觉效果一句话归纳 |",
+  "|------|-----------|----------|---------------|------------------|",
+  "| 题组2 | L?-?-高-题组2 | for 循环 | 机械重复动作 | 探测车循环采集岩石样本 |",
+  "",
+  "## 2. 单个关卡的详细设计方案",
+  "",
+  "### 题组 2 · 循环采集（L?-?-高-题组2）",
+  "",
+  "**舞台区效果描述**",
+  "- 主体：探测车与机械臂",
+  "- 动作流程：进入 -> 抓取迭代 -> 退出",
+  "",
+  "**代码与舞台效果映射**",
+  "",
+  "| 代码行/结构 | 执行阶段 | 舞台表现 | 触发时机 |",
+  "|-----------|---------|---------|---------|",
+  "| `for(i=0;i<n;i++)` | 进入 | 机械臂启动到位 | 循环开始 |",
+  "| `for(i=0;i<n;i++)` | 迭代 | 机械臂抓取一块岩石 | 每次循环体执行 |",
+  "| `for(i=0;i<n;i++)` | 退出 | UI 显示总数 | i==n 时 |",
+  "",
+  "## 3. 可替换效果类型表",
+  "",
+  "| 题组 | 原效果类型 | 可替换效果类型 | 替换优势 |",
+  "|------|-----------|--------------|---------|",
+  "| 题组2 | 机械臂抓取 | 传送带分拣 | 更直观展示循环次数 |",
+].join("\n");
+
+/**
+ * 整合模式产物：模拟 writeStageFile 在 [mode:integration] 下的输出。
+ * 关键特征：
+ * - 文档开头追加"## 用户原始壳子对照表"。
+ * - 保留前置/后置剧情衔接段落。
+ */
+const INTEGRATION_DOC = [
+  "# 关卡设计介绍文档",
+  "",
+  "## 用户原始壳子对照表",
+  "",
+  "| 题组 | 用户原始壳子摘要 | 适配后包装 | 玩法本质是否保留（人工核对） |",
+  "|------|---------------|-----------|---------------------------|",
+  "| 题组1 | 机械臂抓取 N 块岩石 | 月面工程车机械臂抓取陨石样本 | OK（动作类型未变） |",
+  "| 题组2 | 信号灯分支判断 | 月面信号塔色彩分支 | OK（分支结构未变） |",
+  "",
+  "## 1. 关卡设计总览表",
+  "",
+  "| 题组 | courseCode | 核心知识点 | 舞台区效果类型 |",
+  "|------|-----------|----------|---------------|",
+  "| 题组1 | L?-?-题组1 | for 循环 | 机械重复 |",
+  "| 题组2 | L?-?-题组2 | if 分支 | 信号变色 |",
+  "",
+  "## 2. 单个关卡的详细设计方案",
+  "",
+  "### 题组 1 · 月面采集",
+  "**前置剧情衔接**：飞船降落月球后启动工程车。",
+  "**后置剧情衔接**：采集完成后驶向信号塔。",
+  "",
+  "### 题组 2 · 信号塔",
+  "**前置剧情衔接**：工程车带着样本到达信号塔。",
+  "**后置剧情衔接**：信号塔点亮后等待返航指令。",
+].join("\n");
 
 function createChatTestModeResponse(scenario: ChatTestScenario): ChatTestResponse {
   switch (scenario) {
@@ -202,6 +291,42 @@ function createChatTestModeResponse(scenario: ChatTestScenario): ChatTestRespons
       };
     case "request-error":
       return { text: "测试模式：请求级失败" };
+    case "single-group-success":
+      return {
+        text: "已生成单题组关卡设计介绍文档（不含剧情衔接段落）。",
+        toolPart: {
+          type: "dynamic-tool",
+          toolCallId: "test-single-group-tool",
+          toolName: "writeStageFile",
+          state: "output-available",
+          output: {
+            content: SINGLE_GROUP_DOC,
+            artifact: {
+              title: "关卡设计介绍文档",
+              type: "markdown",
+              content: SINGLE_GROUP_DOC,
+            },
+          },
+        },
+      };
+    case "integration-success":
+      return {
+        text: "已根据用户壳子方案生成整合后的关卡设计介绍文档（含原始壳子对照表）。",
+        toolPart: {
+          type: "dynamic-tool",
+          toolCallId: "test-integration-tool",
+          toolName: "writeStageFile",
+          state: "output-available",
+          output: {
+            content: INTEGRATION_DOC,
+            artifact: {
+              title: "关卡设计介绍文档",
+              type: "markdown",
+              content: INTEGRATION_DOC,
+            },
+          },
+        },
+      };
     case "success":
     default:
       return {
