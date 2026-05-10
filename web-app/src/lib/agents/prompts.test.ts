@@ -166,3 +166,117 @@ describe("prompts: planning-mode branches", () => {
     });
   });
 });
+
+// ----------------------------------------------------------------------------
+// 第三批：词汇可懂度 + 代码输出可视化 + 制作可行性
+// 真实失败案例（用户反馈 2026-05-08）：
+//   - 引力锚定桩 / 磁悬浮缓冲垫 / 声波钻探 / 折叠梯太空舱 / 轨道环层叠压缩
+//   原因：硬核科技词汇 + 复杂物理动画 + 不便制作的场景
+//   附加：cout 输出未在舞台呈现（如递归打印 n 时舞台无对应数字）
+// ----------------------------------------------------------------------------
+
+describe("prompts: vocabulary readability + cout visualization + producibility", () => {
+  describe("DESIGNER_PROMPT", () => {
+    it("declares a hard-sci-fi vocabulary blacklist that mentions known offenders", () => {
+      expect(DESIGNER_PROMPT).toContain("硬核科技词汇黑名单");
+      // 用户反馈中明确出现过的词必须被点名
+      expect(DESIGNER_PROMPT).toContain("引力锚");
+      expect(DESIGNER_PROMPT).toContain("磁悬浮");
+      expect(DESIGNER_PROMPT).toContain("声波");
+      expect(DESIGNER_PROMPT).toContain("量子");
+    });
+
+    it("provides a child-friendly vocabulary whitelist for substitution", () => {
+      expect(DESIGNER_PROMPT).toContain("推荐词汇白名单");
+      // 至少包含几个孩子日常能接触的具象词
+      expect(DESIGNER_PROMPT).toContain("机械臂");
+      expect(DESIGNER_PROMPT).toContain("传送带");
+      expect(DESIGNER_PROMPT).toContain("信号灯");
+    });
+
+    it("adds a cout/print row to the execution-phase checklist requiring stage output", () => {
+      expect(DESIGNER_PROMPT).toMatch(/cout|printf|输出语句/);
+      // 必须明确"输出值需要在舞台同步可视化"
+      expect(DESIGNER_PROMPT).toMatch(/输出.{0,50}舞台.{0,30}(可视化|呈现|显示)/);
+    });
+
+    it("introduces a producibility principle (low animation/scene complexity)", () => {
+      expect(DESIGNER_PROMPT).toContain("制作可行性");
+    });
+
+    it("blacklists complex animation/scene patterns that previously failed", () => {
+      expect(DESIGNER_PROMPT).toContain("制作复杂度黑名单");
+      // 用户反馈里明确不好做的模式
+      expect(DESIGNER_PROMPT).toContain("弹簧");
+      expect(DESIGNER_PROMPT).toContain("折叠");
+      expect(DESIGNER_PROMPT).toContain("层叠");
+      expect(DESIGNER_PROMPT).toContain("地下");
+    });
+
+    it("requires every concept to self-rate production difficulty and forbid '困难'", () => {
+      expect(DESIGNER_PROMPT).toContain("制作难度自评");
+      // 必须出现"禁止"或"不允许"输出"困难"等级的概念
+      expect(DESIGNER_PROMPT).toMatch(/(困难|高难)[\s\S]{0,40}(禁止|不允许|不可)/);
+    });
+
+    it("includes a counter-example using a hard-sci-fi term from real feedback", () => {
+      // 至少给出 1 个反例引用真实失败案例（引力锚 / 磁悬浮 / 折叠等）
+      expect(DESIGNER_PROMPT).toMatch(/(引力锚|磁悬浮|折叠).{0,200}(坏例|❌)|(?:坏例|❌).{0,200}(引力锚|磁悬浮|折叠)/);
+    });
+  });
+
+  describe("VALIDATOR_PROMPT", () => {
+    it("imports the hard-sci-fi vocabulary blacklist with concrete offenders", () => {
+      expect(VALIDATOR_PROMPT).toContain("硬核科技词汇黑名单");
+      expect(VALIDATOR_PROMPT).toContain("引力锚");
+      expect(VALIDATOR_PROMPT).toContain("磁悬浮");
+    });
+
+    it("imports the production-complexity blacklist", () => {
+      expect(VALIDATOR_PROMPT).toContain("制作复杂度黑名单");
+      expect(VALIDATOR_PROMPT).toContain("弹簧");
+      expect(VALIDATOR_PROMPT).toContain("折叠");
+    });
+
+    it("appends a cout/output coverage row to the execution-phase checklist", () => {
+      expect(VALIDATOR_PROMPT).toMatch(/cout|输出语句/);
+    });
+
+    it("adds 儿童认知适配 <3 as a third hard veto rule", () => {
+      // 出现明确的一票否决条目
+      expect(VALIDATOR_PROMPT).toMatch(/儿童认知适配\s*<\s*3/);
+    });
+
+    it("explicitly maps blacklist hits to scoring deductions", () => {
+      // 黑名单命中需要触发扣分（不是软建议）
+      expect(VALIDATOR_PROMPT).toMatch(/黑名单[\s\S]{0,200}(扣|≤2|≤3|不通过)/);
+    });
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Kickoff 头锚消息说明（2026-05-09 修复 · 长会话不丢源材料）
+// 配合 src/lib/chat/memory.ts 的 applyHeadAnchorWindow 工作。
+// ----------------------------------------------------------------------------
+
+describe("prompts: kickoff head-anchor instructions", () => {
+  it("ORCHESTRATOR_SYSTEM_PROMPT documents the head-anchor mechanism", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Kickoff 头锚消息");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("第一条用户消息");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("applyHeadAnchorWindow");
+  });
+
+  it("ORCHESTRATOR_SYSTEM_PROMPT instructs the LLM to extract topicInfo from the anchor", () => {
+    // 必须明确写"从头锚里精确摘取 topicInfo"，否则 LLM 会凭印象
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+      /头锚[\s\S]{0,80}(精确摘取|摘取|读取)[\s\S]{0,80}topicInfo/,
+    );
+  });
+
+  it("ORCHESTRATOR_SYSTEM_PROMPT forbids fabricating missing source material", () => {
+    // 头锚里找不到题组源材料时，必须告知用户而非编造
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+      /(找不到|缺失|没有)[\s\S]{0,80}(明确告诉|告知|停下来)/,
+    );
+  });
+});

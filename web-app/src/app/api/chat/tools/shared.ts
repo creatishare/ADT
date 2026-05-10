@@ -1,4 +1,10 @@
-import { generateText, streamText, type LanguageModel } from "ai";
+import {
+  generateObject,
+  generateText,
+  streamText,
+  type LanguageModel,
+} from "ai";
+import type { z } from "zod";
 import { getGate } from "@/lib/llm/gate";
 import { getProviderForModelId, type ModelId } from "@/lib/llm/providers";
 
@@ -225,6 +231,52 @@ function isIdleAbort(err: unknown): boolean {
 }
 
 /**
+ * Structured-output sibling of `runSubAgentText`.
+ *
+ * Wraps `generateObject` with the same provider gate + retry policy and
+ * normalizes errors via `classifySubAgentError`. Used by the `generate_concepts`
+ * branch of `designStageFile` so the LLM produces a typed `ConceptList`
+ * instead of free-form markdown — schema enforcement removes the need for
+ * format-related text in the prompt.
+ *
+ * Streaming path is intentionally NOT supported here: structured generation
+ * provides far less value from streaming, and `generateObject` already has
+ * provider-level fallbacks in the Vercel AI SDK.
+ */
+export async function runSubAgentObject<TSchema extends z.ZodTypeAny>({
+  model,
+  modelId,
+  system,
+  prompt,
+  schema,
+  timeoutMs = SUB_AGENT_TIMEOUT_LIGHT_MS,
+}: {
+  model: LanguageModel;
+  modelId: ModelId;
+  system: string;
+  prompt: string;
+  schema: TSchema;
+  timeoutMs?: number;
+}): Promise<z.infer<TSchema>> {
+  const gate = getGate(getProviderForModelId(modelId));
+  try {
+    return await gate.run(async () => {
+      const { object } = await generateObject({
+        model,
+        system,
+        prompt,
+        schema,
+        maxRetries: SUB_AGENT_MAX_RETRIES,
+        timeout: timeoutMs,
+      });
+      return object as z.infer<TSchema>;
+    });
+  } catch (error) {
+    throw new Error(classifySubAgentError(error, timeoutMs));
+  }
+}
+
+/**
  * Map raw provider/network errors to a short Chinese label plus a
  * machine-matchable prefix like `[network_timeout]`. The prefix lets the
  * Orchestrator prompt (or future code) branch on error kind without parsing
@@ -277,5 +329,31 @@ export function classifySubAgentError(
   if (lower.includes("rate limit") || lower.includes("429")) {
     return "[rate_limited] 子 Agent 被供应商限流。请稍后重试或切换模型。";
   }
+  // Provider 不支持 generateObject 所需的 response_format JSON-schema 模式。
+  // 已知场景：DeepSeek / Doubao / Kimi 的 OpenAI 兼容协议在多数版本上不支持
+  // `response_format: { type: 'json_schema', ... }`，会返回类似
+  //   "This response_format type is unavailable now"
+  //   "response_format is not supported"
+  // 的 400 错误。上层（runGenerateConceptsWithLint）据此前缀自动降级到
+  // generateText 路径。
+  if (
+    lower.includes("response_format") ||
+    lower.includes("response format") ||
+    (lower.includes("json") && lower.includes("schema") && (lower.includes("not support") || lower.includes("unavailable"))) ||
+    (lower.includes("structured") && lower.includes("output") && (lower.includes("not support") || lower.includes("unavailable")))
+  ) {
+    return `[unsupported_response_format] 子 Agent 当前供应商不支持结构化输出（response_format JSON schema），将回退到文本路径。原始错误：${raw}`;
+  }
   return `[sub_agent_error] 子 Agent 调用失败：${raw}`;
+}
+
+/**
+ * Helper for upstream callers (e.g. designStageFile.runGenerateConceptsWithLint)
+ * to detect a normalized "structured output unsupported" error and fall back
+ * to a non-schema text path. Looks for the `[unsupported_response_format]`
+ * prefix produced by `classifySubAgentError`.
+ */
+export function isUnsupportedResponseFormatError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("[unsupported_response_format]");
 }

@@ -15,6 +15,7 @@ import { streamText } from "ai";
 import { _resetGates } from "@/lib/llm/gate";
 import {
   classifySubAgentError,
+  isUnsupportedResponseFormatError,
   runSubAgentText,
   SUB_AGENT_IDLE_HEAVY_MS,
   SUB_AGENT_IDLE_LIGHT_MS,
@@ -124,6 +125,47 @@ describe("classifySubAgentError", () => {
       new Error("[empty_response] 子 Agent 返回空内容（可能触发了内容过滤）")
     );
     expect(msg.startsWith("[empty_response]")).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // [unsupported_response_format] —— DeepSeek/Doubao/Kimi 拒绝 generateObject
+  // schema 模式时的 400 错误。被识别后上游（runGenerateConceptsWithLint）
+  // 会自动 fallback 到 generateText 路径。
+  // -------------------------------------------------------------------------
+
+  it('classifies the DeepSeek "This response_format type is unavailable now" 400 as unsupported', () => {
+    const msg = classifySubAgentError(
+      new Error("This response_format type is unavailable now"),
+    );
+    expect(msg.startsWith("[unsupported_response_format]")).toBe(true);
+  });
+
+  it('classifies generic "response_format is not supported" as unsupported', () => {
+    const msg = classifySubAgentError(
+      new Error("response_format is not supported by this model"),
+    );
+    expect(msg.startsWith("[unsupported_response_format]")).toBe(true);
+  });
+
+  it('classifies "JSON schema not supported" as unsupported', () => {
+    const msg = classifySubAgentError(
+      new Error("JSON schema is not supported on this endpoint"),
+    );
+    expect(msg.startsWith("[unsupported_response_format]")).toBe(true);
+  });
+
+  it("isUnsupportedResponseFormatError detects the prefix in normalized errors", () => {
+    expect(
+      isUnsupportedResponseFormatError(
+        new Error("[unsupported_response_format] 子 Agent ..."),
+      ),
+    ).toBe(true);
+    expect(
+      isUnsupportedResponseFormatError(
+        new Error("[network_timeout] 子 Agent 调用超时"),
+      ),
+    ).toBe(false);
+    expect(isUnsupportedResponseFormatError("plain string error")).toBe(false);
   });
 });
 

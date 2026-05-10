@@ -5,6 +5,7 @@ import {
   MAX_MEMORY_ITEMS,
   MAX_RECENT_MESSAGES,
   MemorySummarySchema,
+  applyHeadAnchorWindow,
   buildLayeredMemoryContext,
   buildTranscript,
   normalizeMessages,
@@ -469,9 +470,18 @@ export async function POST(req: Request) {
   const validRawMessages = rawMessages.filter(
     (m: { role?: unknown }) =>
       m?.role === "system" || m?.role === "user" || m?.role === "assistant"
+  ) as Array<{ role: "system" | "user" | "assistant" }>;
+  // Head-anchor windowing: keeps the kickoff user message (containing all
+  // groups' source material) pinned at index 0 even after long revision
+  // loops. See memory.ts `applyHeadAnchorWindow` doc for details and the
+  // 2026-05-09 DEV_LOG entry for the bug it fixes.
+  const recentMessages = applyHeadAnchorWindow(
+    validRawMessages,
+    MAX_RECENT_MESSAGES,
   );
-  const recentMessages = validRawMessages.slice(-MAX_RECENT_MESSAGES);
-  const modelMessages = await convertToModelMessages(recentMessages);
+  const modelMessages = await convertToModelMessages(
+    recentMessages as Parameters<typeof convertToModelMessages>[0],
+  );
 
   const modelId = resolveModelId(req.headers.get(MODEL_ID_HEADER));
 

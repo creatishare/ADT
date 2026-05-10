@@ -2,9 +2,22 @@ import { tool } from "ai";
 import { z } from "zod";
 import { type LanguageModel } from "ai";
 import { DESIGNER_PROMPT } from "@/lib/agents/prompts";
+import {
+  formatLintFeedback,
+  lintText,
+  type LintHit,
+} from "@/lib/agents/rules";
+import {
+  ConceptListSchema,
+  flattenConceptListForLint,
+  serializeConceptList,
+  type ConceptList,
+} from "@/lib/agents/schemas";
 import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import {
+  isUnsupportedResponseFormatError,
+  runSubAgentObject,
   runSubAgentText,
   SUB_AGENT_TIMEOUT_HEAVY_MS,
   SUB_AGENT_TIMEOUT_LIGHT_MS,
@@ -101,6 +114,153 @@ function getTimeoutMs(mode: DesignMode): number {
     : SUB_AGENT_TIMEOUT_HEAVY_MS;
 }
 
+/**
+ * Maximum lint+retry rounds for `generate_concepts`.
+ * - 1 means: first generate; if blacklist hits, regenerate **once** with
+ *   feedback, then surface whatever comes back (further retries hit
+ *   diminishing returns and risk timeout).
+ */
+const LINT_MAX_RETRIES = 1;
+
+interface ConceptGenResult {
+  /** Markdown ready to drop into artifact.content. */
+  markdown: string;
+  /** Lint hits remaining after the retry budget is exhausted (empty = clean). */
+  lintHitsAfterRetry: LintHit[];
+}
+
+interface RunArgs {
+  subAgentModel: LanguageModel;
+  modelId: ModelId;
+  system: string;
+  prompt: string;
+  timeoutMs: number;
+}
+
+/**
+ * Top-level orchestration for `generate_concepts` with provider-agnostic
+ * structured-output handling.
+ *
+ * Path priority:
+ *  1. **Schema path** — `runSubAgentObject(ConceptListSchema)`. Best when
+ *     the provider supports `response_format: json_schema` (Gemini, GPT).
+ *     Schema enforces format, enums, length limits → no possibility of
+ *     malformed output.
+ *  2. **Text fallback** — triggered when the schema call returns
+ *     `[unsupported_response_format]` (DeepSeek / Doubao / some Kimi
+ *     versions). Uses `runSubAgentText`; the LLM produces markdown
+ *     directly per the DESIGNER_PROMPT template, and we just lint+retry
+ *     on the text. Loses schema-level guarantees but keeps the lint+retry
+ *     red line working across all providers.
+ *
+ * Both paths feed the same `lintText` + 1-shot retry loop and produce the
+ * same `{ markdown, lintHitsAfterRetry }` shape, so callers don't need to
+ * branch on which path ran.
+ */
+async function runGenerateConceptsWithLint(
+  args: RunArgs,
+): Promise<ConceptGenResult> {
+  try {
+    return await runViaSchema(args);
+  } catch (err) {
+    if (isUnsupportedResponseFormatError(err)) {
+      console.warn(
+        "[designStageFile] schema path unsupported by provider — falling back to text path:",
+        err instanceof Error ? err.message : String(err),
+      );
+      return await runViaText(args);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Schema path: structured output → lint flat string → optional 1-shot retry
+ * with feedback prompt.
+ */
+async function runViaSchema(args: RunArgs): Promise<ConceptGenResult> {
+  const { subAgentModel, modelId, system, prompt, timeoutMs } = args;
+
+  let currentPrompt = prompt;
+  let attempt = 0;
+  let list: ConceptList = await runSubAgentObject({
+    model: subAgentModel,
+    modelId,
+    system,
+    prompt: currentPrompt,
+    schema: ConceptListSchema,
+    timeoutMs,
+  });
+
+  while (attempt < LINT_MAX_RETRIES) {
+    const flat = flattenConceptListForLint(list);
+    const hits = lintText(flat);
+    if (hits.length === 0) {
+      return { markdown: serializeConceptList(list), lintHitsAfterRetry: [] };
+    }
+
+    currentPrompt = `${prompt}\n\n---\n\n${formatLintFeedback(hits)}`;
+    list = await runSubAgentObject({
+      model: subAgentModel,
+      modelId,
+      system,
+      prompt: currentPrompt,
+      schema: ConceptListSchema,
+      timeoutMs,
+    });
+    attempt += 1;
+  }
+
+  const finalHits = lintText(flattenConceptListForLint(list));
+  return {
+    markdown: serializeConceptList(list),
+    lintHitsAfterRetry: finalHits,
+  };
+}
+
+/**
+ * Text fallback path: free-form markdown from LLM → lint the markdown
+ * directly → 1-shot retry with feedback prompt. Used when the provider
+ * rejects `generateObject`'s schema mode.
+ *
+ * Note: no schema validation here — relies on DESIGNER_PROMPT's existing
+ * markdown template language. Format may drift slightly from the schema
+ * version, but the artifact contract (markdown string) is identical.
+ */
+async function runViaText(args: RunArgs): Promise<ConceptGenResult> {
+  const { subAgentModel, modelId, system, prompt, timeoutMs } = args;
+
+  let currentPrompt = prompt;
+  let attempt = 0;
+  let text: string = await runSubAgentText({
+    model: subAgentModel,
+    modelId,
+    system,
+    prompt: currentPrompt,
+    timeoutMs,
+  });
+
+  while (attempt < LINT_MAX_RETRIES) {
+    const hits = lintText(text);
+    if (hits.length === 0) {
+      return { markdown: text, lintHitsAfterRetry: [] };
+    }
+
+    currentPrompt = `${prompt}\n\n---\n\n${formatLintFeedback(hits)}`;
+    text = await runSubAgentText({
+      model: subAgentModel,
+      modelId,
+      system,
+      prompt: currentPrompt,
+      timeoutMs,
+    });
+    attempt += 1;
+  }
+
+  const finalHits = lintText(text);
+  return { markdown: text, lintHitsAfterRetry: finalHits };
+}
+
 export function createDesignStageFileTool(
   subAgentModel: LanguageModel,
   modelId: ModelId,
@@ -114,14 +274,33 @@ export function createDesignStageFileTool(
       const effectiveGuidance =
         input.userGuidance?.trim() || fallbackGuidance;
       const prompt = buildPrompt(input, effectiveGuidance);
+      const timeoutMs = getTimeoutMs(input.mode);
 
-      const text = await runSubAgentText({
-        model: subAgentModel,
-        modelId,
-        system: DESIGNER_PROMPT,
-        prompt,
-        timeoutMs: getTimeoutMs(input.mode),
-      });
+      let text: string;
+      if (input.mode === "generate_concepts") {
+        const { markdown, lintHitsAfterRetry } = await runGenerateConceptsWithLint({
+          subAgentModel,
+          modelId,
+          system: DESIGNER_PROMPT,
+          prompt,
+          timeoutMs,
+        });
+        text = markdown;
+        // 若重试后仍命中黑名单，前端用户依然能看到内容（不阻断），
+        // 但在文档末尾追加 lint 警告段，方便编辑核对。
+        if (lintHitsAfterRetry.length > 0) {
+          text +=
+            "\n\n---\n\n> ⚠️ **自动 lint 检测**：仍有黑名单词汇未被替换，请人工复核。\n";
+        }
+      } else {
+        text = await runSubAgentText({
+          model: subAgentModel,
+          modelId,
+          system: DESIGNER_PROMPT,
+          prompt,
+          timeoutMs,
+        });
+      }
 
       return {
         content: text,
@@ -135,3 +314,11 @@ export function createDesignStageFileTool(
     },
   });
 }
+
+// 导出内部函数以便单测可以覆盖 lint+retry 行为而无需启动 LLM。
+export const __testables = {
+  runGenerateConceptsWithLint,
+  runViaSchema,
+  runViaText,
+  LINT_MAX_RETRIES,
+};

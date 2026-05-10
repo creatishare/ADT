@@ -92,8 +92,9 @@ tests/
   → POST /api/chat
       → resolveModelId(header) → createModel()      # 服务端根据 ID 路由到对应供应商
       → normalizeMessages + buildMemoryContext（消息 > 8 条时）
+      → applyHeadAnchorWindow(messages, 8)          # ★ 长会话保护：第 1 条 user 消息永远在窗口首位
       → streamText（Orchestrator 模型）
-          → 工具调用 → tools/ 子文件 → subAgentModel.generateText()
+          → 工具调用 → tools/ 子文件 → subAgentModel.generateText() / generateObject()
           → 返回 { content, artifact }
   → UIMessageStream 流式返回
   → ChatArea（工具状态徽章）
@@ -101,6 +102,10 @@ tests/
   → useArtifactStore.addArtifact()  ← localStorage 自动持久化
   → ArtifactArea 自动渲染
 ```
+
+**长会话鲁棒性（2026-05-09 修复）**：`applyHeadAnchorWindow` 把"第一条 user 消息"（含 4 题组完整知识点）永久钉在历史首位，避免反复修改导致 kickoff 被 `slice(-N)` 切走。详见 `workspace/DEV_LOG.md` 顶部"接手指南"。
+
+**Prompt 与规则解耦（2026-05-08 重构）**：黑/白名单存于 `src/lib/agents/rules/`，`generate_concepts` 模式用 schema-first / text-fallback 双路径 + lint+retry 闭环。详见 DEV_LOG。
 
 ---
 
