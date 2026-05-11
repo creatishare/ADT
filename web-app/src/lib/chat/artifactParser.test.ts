@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMarkdown, parseValidationReport } from "./artifactParser";
+import {
+  normalizeMarkdown,
+  parseOrchestratorState,
+  parseValidationReport,
+  serializeStateGuidance,
+} from "./artifactParser";
 
 describe("normalizeMarkdown — code-fence stripping", () => {
   it("strips a single internal ```markdown fence around a table", () => {
@@ -165,5 +170,100 @@ describe("parseValidationReport — dimension score extraction", () => {
     const report = parseValidationReport(sampleReport);
     expect(report.conclusion).toBe("不通过，需修改");
     expect(report.suggestions.length).toBeGreaterThan(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// parseOrchestratorState — structured guidance accumulator
+// ----------------------------------------------------------------------------
+
+describe("parseOrchestratorState — structured accumulatedGuidance", () => {
+  function wrapState(json: string): string {
+    return ["pre-text", "```state", json, "```", "post-text"].join("\n");
+  }
+
+  it("parses a structured GuidanceModel from the state block", () => {
+    const json = JSON.stringify({
+      currentStep: 2,
+      processedGroups: ["题组1"],
+      pendingGroups: ["题组2"],
+      accumulatedGuidance: {
+        logicVisualPatterns: [
+          {
+            construct: "for循环退出",
+            pattern: "计数器跳动+绿灯亮",
+            polarity: "prefer",
+          },
+        ],
+        wordingStyle: ["现在时"],
+        avoidances: [],
+        perGroupTheme: {
+          "L3-1-高-题组1": { theme: "航天探索" },
+        },
+        mode: "standard",
+      },
+    });
+
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state).not.toBeNull();
+    expect(state?.accumulatedGuidance.logicVisualPatterns).toHaveLength(1);
+    expect(state?.accumulatedGuidance.wordingStyle).toEqual(["现在时"]);
+    expect(state?.accumulatedGuidance.perGroupTheme["L3-1-高-题组1"]?.theme).toBe(
+      "航天探索",
+    );
+    expect(state?.guidanceLines).toContain("✓ for循环退出 → 计数器跳动+绿灯亮");
+    expect(state?.guidanceLines).toContain("现在时");
+  });
+
+  it("falls back gracefully when accumulatedGuidance is a legacy string[]", () => {
+    const json = JSON.stringify({
+      currentStep: 1,
+      accumulatedGuidance: ["legacy line A", "legacy line B"],
+    });
+
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state).not.toBeNull();
+    expect(state?.accumulatedGuidance.wordingStyle).toEqual([
+      "legacy line A",
+      "legacy line B",
+    ]);
+    expect(state?.guidanceLines).toEqual(["legacy line A", "legacy line B"]);
+  });
+
+  it("returns empty guidance when accumulatedGuidance is missing", () => {
+    const json = JSON.stringify({ currentStep: 1 });
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state?.accumulatedGuidance.logicVisualPatterns).toEqual([]);
+    expect(state?.accumulatedGuidance.perGroupTheme).toEqual({});
+    expect(state?.guidanceLines).toEqual([]);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// serializeStateGuidance — per-group theme isolation regression test
+// ----------------------------------------------------------------------------
+
+describe("serializeStateGuidance — per-group theme isolation", () => {
+  it("never includes theme entries for groups other than the active courseCode", () => {
+    const json = JSON.stringify({
+      accumulatedGuidance: {
+        perGroupTheme: {
+          "L3-1-高-题组1": { theme: "航天探索" },
+          "L3-1-高-题组2": { theme: "机械工程" },
+        },
+      },
+    });
+    const state = parseOrchestratorState(
+      ["```state", json, "```"].join("\n"),
+    );
+    expect(state).not.toBeNull();
+
+    const forGroup2 = serializeStateGuidance(state!, "L3-1-高-题组2");
+    expect(forGroup2).toContain("机械工程");
+    expect(forGroup2).not.toContain("航天探索");
+
+    const crossGroup = serializeStateGuidance(state!);
+    expect(crossGroup).not.toContain("机械工程");
+    expect(crossGroup).not.toContain("航天探索");
   });
 });

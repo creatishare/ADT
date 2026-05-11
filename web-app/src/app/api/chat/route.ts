@@ -13,6 +13,7 @@ import {
   type RequestMessage,
 } from "../../../lib/chat/memory";
 import { parseOrchestratorState } from "@/lib/chat/artifactParser";
+import { serializeGuidanceForPrompt } from "@/lib/agents/guidance";
 import {
   createDesignStageFileTool,
   createWriteStageFileTool,
@@ -354,15 +355,25 @@ function createChatTestModeResponse(scenario: ChatTestScenario): ChatTestRespons
  * Walk back through history to find the most recent accumulatedGuidance from
  * an assistant state block. Used as a server-side safety net in case the LLM
  * forgets to pass userGuidance to a sub-agent tool.
+ *
+ * The fallback is **scope-agnostic**: it serializes only the cross-group
+ * dimensions (logicVisualPatterns / wordingStyle / avoidances + mode flag)
+ * without any `perGroupTheme` entry. The per-group theme can only be safely
+ * emitted when we know which courseCode the next call targets, which this
+ * helper does not — passing the wrong courseCode's theme to a different
+ * group is exactly the cross-group bias bug we are fixing. The orchestrator
+ * itself remains responsible for attaching the correct per-group theme via
+ * its own structured `userGuidance` arg when it intentionally invokes a
+ * tool for a specific courseCode.
  */
 function extractLatestGuidance(messages: RequestMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
     if (!m || m.role !== "assistant") continue;
     const state = parseOrchestratorState(getMessageText(m));
-    if (state && state.accumulatedGuidance.length > 0) {
-      return state.accumulatedGuidance.map((line) => `- ${line}`).join("\n");
-    }
+    if (!state) continue;
+    const serialized = serializeGuidanceForPrompt(state.accumulatedGuidance);
+    if (serialized.length > 0) return serialized;
   }
   return "";
 }

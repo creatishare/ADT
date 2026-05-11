@@ -45,7 +45,13 @@ export const designStageFileInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "【极其重要】从对话历史中总结出的用户指导、偏好、修改意见和避坑规则。必须传递给子Agent！"
+      "【极其重要】将 State Block 的 accumulatedGuidance 按段落格式序列化后传入：\n" +
+        "- `[mode:single-group|integration|standard]`（首行）\n" +
+        "- `## 跨题组逻辑↔舞台映射偏好`（每行 `✓/✗ 代码结构 → 舞台模式`，长期跨题组）\n" +
+        "- `## 用词与排版偏好`（长期跨题组）\n" +
+        "- `## 用户明确禁忌`（长期跨题组）\n" +
+        "- `## 当前题组题材（仅 <courseCode>）`（**仅** generate_concepts 模式且 perGroupTheme 含当前 courseCode 时输出；其它题组的题材**严禁**出现）\n" +
+        "空段省略。模式 integrate_document / adapt_concepts 必须省略'当前题组题材'段。"
     ),
   courseCode: z
     .string()

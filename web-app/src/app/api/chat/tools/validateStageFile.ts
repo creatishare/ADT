@@ -23,7 +23,8 @@ export function createValidateStageFileTool(
         .string()
         .optional()
         .describe(
-          "【极其重要】用户特别关心的验证重点或之前的踩坑点。必须传递！"
+          "【极其重要】按段落格式序列化的 accumulatedGuidance：mode 行 + 跨题组逻辑映射偏好 / 用词偏好 / 禁忌；" +
+            "验证跨多个题组的完整文档时**省略**'当前题组题材'段，避免单题组题材污染全局判分。"
         ),
       courseCode: z
         .string()

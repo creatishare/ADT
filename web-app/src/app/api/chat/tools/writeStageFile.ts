@@ -24,7 +24,8 @@ export function createWriteStageFileTool(
         .string()
         .optional()
         .describe(
-          "【极其重要】从对话历史中总结出的用户指导、排版偏好或用词规则。必须传递！"
+          "【极其重要】按段落格式序列化的 accumulatedGuidance：mode 行 + 跨题组逻辑映射偏好 / 用词偏好 / 禁忌。" +
+            "写作多题组合并文档时**省略**'当前题组题材'段；单题组模式可包含该段以便 Writer 引用题材作上下文。"
         ),
       courseCode: z
         .string()

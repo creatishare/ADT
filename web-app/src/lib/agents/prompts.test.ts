@@ -280,3 +280,102 @@ describe("prompts: kickoff head-anchor instructions", () => {
     );
   });
 });
+
+// ----------------------------------------------------------------------------
+// 第四批：结构化 accumulatedGuidance 与作用域隔离（2026-05-11）
+// 真实失败案例：扁平 string[] 形态把"用户在题组1挑了航天题材"当作长期偏好
+//   传给题组2/3/4 的 designStageFile.generate_concepts，导致跨题组题材趋同。
+// ----------------------------------------------------------------------------
+
+describe("prompts: structured accumulatedGuidance & scope isolation", () => {
+  describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
+    it("documents accumulatedGuidance as a structured object (not string[])", () => {
+      // State Block 示例必须出现结构化字段名
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("logicVisualPatterns");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("wordingStyle");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("avoidances");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("perGroupTheme");
+    });
+
+    it("ties perGroupTheme keys to courseCode", () => {
+      // perGroupTheme 的 key 必须是 courseCode 而不是"题组N"字串
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+        /perGroupTheme[\s\S]{0,200}courseCode/,
+      );
+    });
+
+    it("classifies the 4 user-signal buckets explicitly", () => {
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("桶 1");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("桶 2");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("桶 3");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("桶 4");
+    });
+
+    it("forbids treating single-group theme choice as a cross-group preference", () => {
+      // 关键反向去重规则：单题组题材不可外溢
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+        /(严禁|不要|绝不)[\s\S]{0,200}(单题组|题材选择)[\s\S]{0,200}(跨题组|长期偏好)/,
+      );
+    });
+
+    it("requires per-group theme to remain scoped only to its courseCode", () => {
+      // perGroupTheme 段在调用下一题组时不应外泄
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+        /当前题组题材[\s\S]{0,300}(不要|严禁|绝不)[\s\S]{0,80}(其它题组|下一题组|塞进)/,
+      );
+    });
+
+    it("requires segmented userGuidance serialization with named section headers", () => {
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## 跨题组逻辑↔舞台映射偏好");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## 用词与排版偏好");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## 用户明确禁忌");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## 当前题组题材");
+    });
+
+    it("instructs cross-group tool calls to omit the per-group theme section", () => {
+      // integrate_document / adapt_concepts 调用必须省略题材段
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+        /(integrate_document|adapt_concepts)[\s\S]{0,200}(省略|不输出)[\s\S]{0,80}当前题组题材/,
+      );
+    });
+  });
+
+  describe("DESIGNER_PROMPT", () => {
+    it("consumes the logicVisualPatterns section by name", () => {
+      expect(DESIGNER_PROMPT).toContain("## 跨题组逻辑↔舞台映射偏好");
+    });
+
+    it("treats ✗ patterns as avoid and ✓ patterns as prefer", () => {
+      // Order-agnostic: either "✓ ... 优先/采用" or "优先/采用 ... ✓" is acceptable
+      expect(DESIGNER_PROMPT).toMatch(
+        /(?:✓[\s\S]{0,80}(?:优先|采用)|(?:优先|采用)[\s\S]{0,80}✓)/,
+      );
+      expect(DESIGNER_PROMPT).toMatch(
+        /(?:✗[\s\S]{0,80}(?:避免|不要)|(?:避免|不要)[\s\S]{0,80}✗)/,
+      );
+    });
+
+    it("forbids inferring forbidden/used themes from session impression", () => {
+      // 没有显式题材段时，不允许"凭历史印象"主动回避或主动复用题材。
+      // Order-agnostic on "禁止" + "历史/印象" co-occurrence within a window.
+      expect(DESIGNER_PROMPT).toMatch(
+        /(?:(?:禁止|不要|绝不)[\s\S]{0,200}(?:历史|印象)|(?:历史|印象)[\s\S]{0,200}(?:禁止|不要|绝不))/,
+      );
+    });
+  });
+
+  describe("VALIDATOR_PROMPT", () => {
+    it("treats ✗ logic-pattern hits as a concrete scoring deduction", () => {
+      expect(VALIDATOR_PROMPT).toContain("## 跨题组逻辑↔舞台映射偏好");
+      // ✗ 命中必须降代码-舞台一致性维度
+      expect(VALIDATOR_PROMPT).toMatch(/✗[\s\S]{0,200}(代码-舞台一致性|≤3)/);
+    });
+  });
+
+  describe("WRITER_PROMPT", () => {
+    it("rewrites mapping rows to follow ✓ patterns when provided", () => {
+      expect(WRITER_PROMPT).toContain("## 跨题组逻辑↔舞台映射偏好");
+      expect(WRITER_PROMPT).toMatch(/✓[\s\S]{0,80}(优先|采用|覆写)/);
+    });
+  });
+});
