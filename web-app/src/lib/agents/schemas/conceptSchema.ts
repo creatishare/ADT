@@ -84,6 +84,41 @@ export const CodeMappingRow = z.object({
 export type CodeMappingRow = z.infer<typeof CodeMappingRow>;
 
 /**
+ * 单个概念的"剧情冲突"块——把代码结构和剧情物理绑死，避免硬贴剧情。
+ *
+ * 三段必须齐全：
+ *  1. blocker：角色此刻被什么具体的物理/工程问题卡住（不是"需要循环 3 次"，
+ *     而是"3 块样本散落在 3 个岩缝、机械臂一次只能进一个岩缝"）。
+ *  2. whyThisCode：为什么顺序结构 / 暴力解决不行——把"循环次数变化、
+ *     深度未知、分支决策时机"等绑进剧情物理。
+ *  3. failureCost：失败代价是什么（漏一块样本会怎样？分支选错会怎样？）。
+ *
+ * 三段都做"替换测试"——把这个代码结构换成顺序展开或暴力解，
+ * 剧情物理是否立刻崩。崩 = 知识点长在剧情里；不崩 = 硬贴。
+ */
+export const DramaticConflict = z.object({
+  blocker: z
+    .string()
+    .min(10)
+    .describe(
+      "角色被什么具体的物理/工程问题卡住（具象到舞台可见的物体/数量/位置变化，不是叙述层抽象描述）",
+    ),
+  whyThisCode: z
+    .string()
+    .min(10)
+    .describe(
+      "为什么顺序结构 / 暴力解不行——必须把代码结构（循环/分支/递归）和剧情物理绑死",
+    ),
+  failureCost: z
+    .string()
+    .min(6)
+    .describe(
+      "若知识点未正确应用，剧情中会出现什么可见的失败后果（任务取消、样本损毁、角色被困等）",
+    ),
+});
+export type DramaticConflict = z.infer<typeof DramaticConflict>;
+
+/**
  * 单个概念。
  */
 export const ConceptSchema = z.object({
@@ -97,6 +132,9 @@ export const ConceptSchema = z.object({
     .string()
     .min(8)
     .describe("一句话包装：主体 + 动作 + 结果"),
+  dramaticConflict: DramaticConflict.describe(
+    "剧情冲突块：保证知识点'长在'剧情里而非'贴在'剧情上",
+  ),
   codeMapping: z
     .array(CodeMappingRow)
     .min(3)

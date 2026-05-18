@@ -15,6 +15,7 @@ import { streamText } from "ai";
 import { _resetGates } from "@/lib/llm/gate";
 import {
   classifySubAgentError,
+  isSchemaPathRecoverableError,
   isUnsupportedResponseFormatError,
   runSubAgentText,
   SUB_AGENT_IDLE_HEAVY_MS,
@@ -166,6 +167,55 @@ describe("classifySubAgentError", () => {
       ),
     ).toBe(false);
     expect(isUnsupportedResponseFormatError("plain string error")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // [schema_parse_failed] —— provider 接受了 schema 模式，但 LLM 输出无法被解析
+  // 回 Zod schema（缺字段 / 长度不足 / 格式偏离）。常见于 prompt 升级后过渡期
+  // （如新增 dramaticConflict 块时 LLM 漏写）。这类错误必须自动 fallback 到
+  // generateText 文本路径，让 lint+retry 兜底，而不是把整个工具调用标红。
+  // -------------------------------------------------------------------------
+
+  it('classifies AI-SDK "No object generated: could not parse the response" as schema_parse_failed', () => {
+    const msg = classifySubAgentError(
+      new Error("No object generated: could not parse the response."),
+    );
+    expect(msg.startsWith("[schema_parse_failed]")).toBe(true);
+  });
+
+  it("classifies ZodError validation failures as schema_parse_failed", () => {
+    const msg = classifySubAgentError(
+      new Error('ZodError: Required at "concepts[0].dramaticConflict.blocker"'),
+    );
+    expect(msg.startsWith("[schema_parse_failed]")).toBe(true);
+  });
+
+  it("classifies generic schema validation failures as schema_parse_failed", () => {
+    const msg = classifySubAgentError(
+      new Error("schema validation failed: missing required field"),
+    );
+    expect(msg.startsWith("[schema_parse_failed]")).toBe(true);
+  });
+
+  it("isSchemaPathRecoverableError covers BOTH unsupported and parse-failed", () => {
+    expect(
+      isSchemaPathRecoverableError(
+        new Error("[unsupported_response_format] 不支持 schema"),
+      ),
+    ).toBe(true);
+    expect(
+      isSchemaPathRecoverableError(
+        new Error("[schema_parse_failed] LLM 输出不符合 schema"),
+      ),
+    ).toBe(true);
+    // 非可恢复错误不应触发 fallback
+    expect(
+      isSchemaPathRecoverableError(new Error("[auth_failed] 鉴权失败")),
+    ).toBe(false);
+    expect(
+      isSchemaPathRecoverableError(new Error("[network_timeout] 调用超时")),
+    ).toBe(false);
+    expect(isSchemaPathRecoverableError("plain string")).toBe(false);
   });
 });
 

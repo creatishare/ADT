@@ -17,12 +17,17 @@ export function serializeConcept(c: Concept, n: number): string {
     .map((row) => `  | ${row.structure} | ${row.phase} | ${row.stageEffect} |`)
     .join("\n");
   const elements = c.visualKeyElements.join(" / ");
+  const dc = c.dramaticConflict;
 
   return [
     `## 概念 ${n}：${c.title}`,
     "",
     `- **题材维度**：${c.themeDimension}`,
     `- **一句话包装**：${c.oneLineWrapper}`,
+    `- **剧情冲突 (Why this code is the ONLY way)**：`,
+    `  - **角色被什么卡住**：${dc.blocker}`,
+    `  - **为什么必须用这个知识点**：${dc.whyThisCode}`,
+    `  - **失败代价**：${dc.failureCost}`,
     `- **代码映射表**：`,
     `  | 代码结构 | 执行阶段 | 舞台表现 |`,
     `  |---------|---------|---------|`,
@@ -45,6 +50,9 @@ export function flattenConceptForLint(c: Concept): string {
   return [
     c.title,
     c.oneLineWrapper,
+    c.dramaticConflict.blocker,
+    c.dramaticConflict.whyThisCode,
+    c.dramaticConflict.failureCost,
     c.diffFromOthers,
     c.vocabularyCheck,
     c.visualKeyElements.join(" "),

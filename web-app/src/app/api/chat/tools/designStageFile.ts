@@ -16,6 +16,7 @@ import {
 import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import {
+  isSchemaPathRecoverableError,
   isUnsupportedResponseFormatError,
   runSubAgentObject,
   runSubAgentText,
@@ -169,9 +170,16 @@ async function runGenerateConceptsWithLint(
   try {
     return await runViaSchema(args);
   } catch (err) {
-    if (isUnsupportedResponseFormatError(err)) {
+    // 两类可恢复错误都降级到文本路径：
+    //  1. [unsupported_response_format] —— provider 拒绝 schema 模式（DeepSeek 等）
+    //  2. [schema_parse_failed] —— provider 接受 schema 但 LLM 输出不符合（如新字段
+    //     dramaticConflict 没写满 / 漏字段；常见于 prompt 升级后的过渡期）
+    if (isSchemaPathRecoverableError(err)) {
+      const reason = isUnsupportedResponseFormatError(err)
+        ? "unsupported by provider"
+        : "LLM output failed schema validation";
       console.warn(
-        "[designStageFile] schema path unsupported by provider — falling back to text path:",
+        `[designStageFile] schema path ${reason} — falling back to text path:`,
         err instanceof Error ? err.message : String(err),
       );
       return await runViaText(args);

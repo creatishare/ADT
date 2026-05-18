@@ -344,6 +344,23 @@ export function classifySubAgentError(
   ) {
     return `[unsupported_response_format] 子 Agent 当前供应商不支持结构化输出（response_format JSON schema），将回退到文本路径。原始错误：${raw}`;
   }
+  // Provider 接受了 schema 模式但 LLM 的输出无法被解析回 schema。
+  // 已知场景：
+  //  - Vercel AI SDK 的 `NoObjectGeneratedError`，message 含 "No object generated"
+  //    或 "could not parse the response" / "could not parse the JSON"。
+  //  - Zod 校验失败（缺字段、长度不达标、枚举不匹配），message 含 "ZodError"
+  //    或 "validation"。
+  // 这类错误**可恢复**——上层（runGenerateConceptsWithLint）据此前缀降级到
+  // generateText 文本路径，由 lint+retry 兜底；不是终结性失败。
+  if (
+    lower.includes("no object generated") ||
+    lower.includes("could not parse") ||
+    lower.includes("zoderror") ||
+    (lower.includes("schema") && lower.includes("validation")) ||
+    (lower.includes("validation") && lower.includes("fail"))
+  ) {
+    return `[schema_parse_failed] 子 Agent 结构化输出未通过 schema 校验（缺字段 / 长度不足 / 格式偏离），将回退到文本路径。原始错误：${raw}`;
+  }
   return `[sub_agent_error] 子 Agent 调用失败：${raw}`;
 }
 
@@ -356,4 +373,20 @@ export function classifySubAgentError(
 export function isUnsupportedResponseFormatError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.includes("[unsupported_response_format]");
+}
+
+/**
+ * Schema 路径可恢复错误的总判定 —— 涵盖两种 case：
+ *   1. Provider 不支持 schema 模式（[unsupported_response_format]）
+ *   2. Provider 支持但 LLM 输出不符合 schema（[schema_parse_failed]）
+ *
+ * 两种都应该降级到 generateText 文本路径，由 lint+retry 兜底，而不是
+ * 把整个工具调用标记为失败让用户看到红字。
+ */
+export function isSchemaPathRecoverableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("[unsupported_response_format]") ||
+    msg.includes("[schema_parse_failed]")
+  );
 }

@@ -45,7 +45,7 @@ export function createWriteStageFileTool(
       if (effectiveGuidance) {
         prompt += `【用户特别指导意见 (重要！)】：\n${effectiveGuidance}\n\n`;
       }
-      prompt += `请将以上内容扩展撰写为正式落地的《关卡设计介绍文档》。包含关卡设计总览表、单个关卡的详细方案（附前后剧情）以及可替换效果类型表。`;
+      prompt += `请将以上内容扩展撰写为正式落地的《关卡设计介绍文档》。包含关卡设计总览表（含"为什么必须用本知识点"列）、单个关卡的详细方案（含冲突起点 / 为什么必须用本知识点 / 冲突解除后的舞台变化三段）以及可替换效果类型表。务必保证相邻题组"冲突解除后的舞台变化"与"冲突起点"咬合到同一个物理状态，不要用叙述层过渡句胶水替代。`;
 
       const text = await runSubAgentText({
         model: subAgentModel,

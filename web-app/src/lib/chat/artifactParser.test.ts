@@ -171,6 +171,63 @@ describe("parseValidationReport — dimension score extraction", () => {
     expect(report.conclusion).toBe("不通过，需修改");
     expect(report.suggestions.length).toBeGreaterThan(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // 2026-05-14 第 3 步：VALIDATOR_PROMPT 加第 5 维度"知识点必要性"，总分 20→25。
+  // Parser 本来就是按行 X/Y 解析、与总分无关——这里加防御性测试，保证未来
+  // 改维度数量不会让 parser 静默漂移。
+  // ---------------------------------------------------------------------------
+
+  it("parses the new 5-dimension / 25-total report shape (with 知识点必要性)", () => {
+    const fiveDimReport = `## 验证报告
+
+### 总体结论
+**通过** 总分：22/25
+
+### 评分明细
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 非魔法性 | 5/5 | 所有现象均为科技设备 |
+| 代码-舞台一致性 | 4/5 | 题组3 递归归出动画偏弱 |
+| 知识点必要性 | 4/5 | 替换测试：题组1 平铺写法因份数未知失败 ✅ |
+| 儿童认知适配 | 4/5 | 节奏适合 8-12 岁 |
+| 剧情连贯性 | 5/5 | 物理状态钩子接力顺畅 |
+`;
+    const report = parseValidationReport(fiveDimReport);
+    expect(report.dimensions).toHaveLength(5);
+    const names = report.dimensions.map((d) => d.name);
+    expect(names).toContain("知识点必要性");
+    const necessity = report.dimensions.find((d) => d.name === "知识点必要性");
+    expect(necessity).toMatchObject({
+      score: "4/5",
+      scoreValue: 4,
+      maxScore: 5,
+      passed: false, // 4 != 5
+    });
+    expect(report.conclusion).toBe("通过");
+  });
+
+  it('silently skips N/A rows from [mode:single-group] reports (剧情连贯性 = N/A)', () => {
+    const singleGroupReport = `## 验证报告
+
+### 总体结论
+**通过** 总分：18/20
+
+### 评分明细
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 非魔法性 | 5/5 | 完全科学具象 |
+| 代码-舞台一致性 | 4/5 | 微缺漏 |
+| 知识点必要性 | 5/5 | 替换测试 ✅ |
+| 儿童认知适配 | 4/5 | 节奏适合 |
+| 剧情连贯性 | N/A | 单题组无上下游 |
+`;
+    const report = parseValidationReport(singleGroupReport);
+    // N/A 行被静默跳过（regex 不匹配 X/Y）；只剩 4 条可解析维度
+    expect(report.dimensions).toHaveLength(4);
+    expect(report.dimensions.map((d) => d.name)).not.toContain("剧情连贯性");
+    expect(report.dimensions.find((d) => d.name === "知识点必要性")?.scoreValue).toBe(5);
+  });
 });
 
 // ----------------------------------------------------------------------------

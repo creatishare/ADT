@@ -3,6 +3,7 @@ export {
   ThemeDimension,
   ProductionDifficulty,
   CodeMappingRow,
+  DramaticConflict,
   ConceptSchema,
   ConceptListSchema,
   type Concept,
