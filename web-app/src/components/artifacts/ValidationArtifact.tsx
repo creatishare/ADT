@@ -2,12 +2,57 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle, CheckCircle2, ShieldCheck, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ShieldCheck, ShieldAlert, Lock } from "lucide-react";
 import type {
   DimensionScore,
   ValidationReport,
 } from "@/lib/chat/artifactParser";
 import { SectionLabel } from "@/components/workspace/primitives/SectionLabel";
+
+/**
+ * 硬门槛维度配置 (2026-05-14)
+ *
+ * VALIDATOR_PROMPT 的 5 维评分里有 4 条"一票否决"硬门槛：
+ *   - 非魔法性 ≥ 4
+ *   - 代码-舞台一致性 ≥ 4
+ *   - 知识点必要性 ≥ 4   ← 2026-05-14 新增的"硬贴剧情"防线
+ *   - 儿童认知适配 ≥ 3
+ *
+ * 维度数据按名称模糊匹配——和 prompt 表头同源，未来改名要同步。
+ *
+ * "necessity" 标记的是"知识点必要性"——它的硬门槛是整个'知识点长在剧情里'闭环
+ * 的核心抓手。低于阈值时给出最显眼的红色 + lock 图标 + 一段"硬门槛违反"说明，
+ * 避免被当成普通的"扣分项"略过。
+ */
+const HARD_GATE_CONFIG: ReadonlyArray<{
+  match: RegExp;
+  threshold: number;
+  necessity?: boolean;
+}> = [
+  { match: /非魔法/, threshold: 4 },
+  { match: /一致性/, threshold: 4 },
+  { match: /必要性/, threshold: 4, necessity: true },
+  { match: /认知/, threshold: 3 },
+];
+
+/**
+ * 给定一个维度，判定它是否触发硬门槛违反，以及是否是"知识点必要性"这条
+ * 关键硬门槛（用于 UI 上做差异化高亮）。
+ */
+function classifyDimension(dim: DimensionScore): {
+  isHardGateViolation: boolean;
+  isNecessityGate: boolean;
+} {
+  for (const cfg of HARD_GATE_CONFIG) {
+    if (cfg.match.test(dim.name)) {
+      return {
+        isHardGateViolation: dim.scoreValue < cfg.threshold,
+        isNecessityGate: cfg.necessity === true,
+      };
+    }
+  }
+  return { isHardGateViolation: false, isNecessityGate: false };
+}
 
 interface ValidationArtifactProps {
   report: ValidationReport;
@@ -112,6 +157,186 @@ function getFailingDimensions(report: ValidationReport): DimensionScore[] {
   return report.dimensions.filter((d) => !d.passed);
 }
 
+/**
+ * 总分横幅 —— 2026-05-14 新增。
+ *
+ * 把 5 维评分的"已达成 / 满分"做成一个进度条，让用户在不读 markdown 的
+ * 情况下也能一眼判断"离通过线还差多远"。
+ *
+ * 通过线：
+ *   - standard / integration 模式：≥ 18/25
+ *   - single-group 模式（剧情连贯性 N/A，只剩 4 维）：≥ 14/20
+ *
+ * 阈值是按"实际维度满分总和"动态计算的——parser 会自动跳过 N/A 行，所以
+ * `dimensions.length × maxScore` 自然反映了模式。
+ */
+function TotalScoreBar({ dimensions }: { dimensions: DimensionScore[] }) {
+  if (dimensions.length === 0) return null;
+
+  const earned = dimensions.reduce((acc, d) => acc + d.scoreValue, 0);
+  const total = dimensions.reduce((acc, d) => acc + d.maxScore, 0);
+  const ratio = total > 0 ? earned / total : 0;
+  // 通过阈值 = 总分 × 0.72（18/25 = 14/20 = 0.72 倍系数）
+  const passThreshold = Math.ceil(total * 0.72);
+  const reachedThreshold = earned >= passThreshold;
+
+  // 没达标用 danger 调色，达标用 success 调色
+  const tone = reachedThreshold
+    ? { fill: "var(--success-ink)", soft: "var(--success-soft)" }
+    : { fill: "var(--danger-ink)", soft: "var(--danger-soft)" };
+
+  return (
+    <div className="mb-3 flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between">
+        <span
+          className="text-[11px] font-medium uppercase tracking-[0.08em]"
+          style={{ color: "var(--fg-faint)" }}
+        >
+          总分
+        </span>
+        <span className="flex items-baseline gap-1.5">
+          <span
+            className="font-mono text-[18px] font-semibold tabular-nums"
+            style={{ color: tone.fill }}
+          >
+            {earned}
+          </span>
+          <span
+            className="font-mono text-[12px] tabular-nums"
+            style={{ color: "var(--fg-faint)" }}
+          >
+            /{total}
+          </span>
+          <span
+            className="ml-1 text-[10px]"
+            style={{ color: "var(--fg-faint)" }}
+          >
+            通过线 ≥{passThreshold}
+          </span>
+        </span>
+      </div>
+      <div
+        className="relative h-1.5 overflow-hidden rounded-full"
+        style={{ background: tone.soft }}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full transition-all"
+          style={{
+            width: `${Math.min(100, ratio * 100)}%`,
+            background: tone.fill,
+          }}
+        />
+        {/* 通过线刻度 */}
+        <div
+          className="absolute inset-y-0 w-px"
+          style={{
+            left: `${Math.min(100, (passThreshold / total) * 100)}%`,
+            background: "var(--fg-faint)",
+            opacity: 0.5,
+          }}
+          aria-label={`通过线 ${passThreshold}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 单个维度的评分行 —— progress bar + 得分 + 描述。
+ *
+ * 三种状态：
+ *   1. 满分 (passed=true)：success 调色 + ✓ 标记
+ *   2. 硬门槛违反 (isHardGateViolation)：danger 调色 + 锁形图标 + "硬门槛"标签
+ *      - 进一步 isNecessityGate 时会在描述区上方加一条"<4 触发一票否决"提示
+ *   3. 其他扣分：accent (warning) 调色 + ⚠️ 标记
+ */
+function DimensionRow({ dim }: { dim: DimensionScore }) {
+  const { isHardGateViolation, isNecessityGate } = classifyDimension(dim);
+  const ratio = dim.maxScore > 0 ? dim.scoreValue / dim.maxScore : 0;
+
+  const tone = dim.passed
+    ? {
+        fill: "var(--success-ink)",
+        soft: "var(--success-soft)",
+        text: "var(--success-ink)",
+      }
+    : isHardGateViolation
+    ? {
+        fill: "var(--danger-ink)",
+        soft: "var(--danger-soft)",
+        text: "var(--danger-ink)",
+      }
+    : {
+        fill: "var(--accent-ink)",
+        soft: "var(--accent-soft)",
+        text: "var(--accent-ink)",
+      };
+
+  const StatusIcon = dim.passed
+    ? CheckCircle2
+    : isHardGateViolation
+    ? Lock
+    : AlertTriangle;
+
+  return (
+    <li className="flex flex-col gap-1.5 rounded-lg px-2 py-2">
+      <div className="flex items-center gap-2">
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+          style={{ background: tone.soft }}
+        >
+          <StatusIcon className="h-3 w-3" style={{ color: tone.text }} />
+        </span>
+        <span
+          className="text-[12px] font-semibold"
+          style={{ color: "var(--fg-primary)" }}
+        >
+          {dim.name}
+        </span>
+        {isHardGateViolation ? (
+          <span
+            className="rounded-full px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em]"
+            style={{ background: tone.soft, color: tone.text }}
+          >
+            硬门槛
+          </span>
+        ) : null}
+        <span
+          className="ml-auto font-mono text-[11px] tabular-nums"
+          style={{ color: tone.text }}
+        >
+          {dim.score}
+        </span>
+      </div>
+      <div
+        className="relative h-1 overflow-hidden rounded-full"
+        style={{ background: tone.soft }}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full transition-all"
+          style={{ width: `${ratio * 100}%`, background: tone.fill }}
+        />
+      </div>
+      {isHardGateViolation && isNecessityGate ? (
+        <p
+          className="text-[10.5px] leading-[1.5]"
+          style={{ color: tone.text }}
+        >
+          ⚠️ &lt;4 触发一票否决——必须重写概念把代码结构和剧情物理绑死（做&ldquo;替换测试&rdquo;），而非&ldquo;扣分通过&rdquo;。
+        </p>
+      ) : null}
+      {dim.description ? (
+        <p
+          className="text-[11px] leading-5"
+          style={{ color: "var(--fg-secondary)" }}
+        >
+          {dim.description}
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
 export function ValidationArtifact({
   report,
   rawContent,
@@ -198,82 +423,16 @@ export function ValidationArtifact({
               boxShadow: "inset 0 0 0 1px var(--border)",
             }}
           >
-            <SectionLabel className="mb-3">逐项校验</SectionLabel>
+            <SectionLabel className="mb-3">5 维评分全景</SectionLabel>
             {hasDimensionData ? (
-              failingDimensions.length > 0 ? (
-                <ul className="flex flex-col gap-2">
-                  {failingDimensions.map((dim) => {
-                    const isBlocked = dim.scoreValue === 0;
-                    const tone = isBlocked
-                      ? {
-                          bg: "var(--danger-soft)",
-                          ink: "var(--danger-ink)",
-                        }
-                      : {
-                          bg: "var(--accent-soft)",
-                          ink: "var(--accent-ink)",
-                        };
-                    return (
-                      <li
-                        key={dim.name}
-                        className="flex items-start gap-2.5 rounded-lg px-2 py-1.5"
-                      >
-                        <span
-                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                          style={{ background: tone.bg }}
-                        >
-                          <AlertTriangle
-                            className="h-3 w-3"
-                            style={{ color: tone.ink }}
-                          />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="text-[12px] font-semibold"
-                              style={{ color: "var(--fg-primary)" }}
-                            >
-                              {dim.name}
-                            </span>
-                            <span
-                              className="font-mono text-[11px] tabular-nums"
-                              style={{ color: tone.ink }}
-                            >
-                              {dim.score}
-                            </span>
-                          </div>
-                          {dim.description ? (
-                            <p
-                              className="mt-0.5 text-[11px] leading-5"
-                              style={{ color: "var(--fg-secondary)" }}
-                            >
-                              {dim.description}
-                            </p>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
+              <>
+                <TotalScoreBar dimensions={report.dimensions} />
+                <ul className="flex flex-col gap-1">
+                  {report.dimensions.map((dim) => (
+                    <DimensionRow key={dim.name} dim={dim} />
+                  ))}
                 </ul>
-              ) : (
-                <div className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
-                  <span
-                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                    style={{ background: "var(--success-soft)" }}
-                  >
-                    <CheckCircle2
-                      className="h-3 w-3"
-                      style={{ color: "var(--success-ink)" }}
-                    />
-                  </span>
-                  <span
-                    className="text-[12px] leading-6"
-                    style={{ color: "var(--fg-secondary)" }}
-                  >
-                    所有维度均为满分，无扣分项。
-                  </span>
-                </div>
-              )
+              </>
             ) : report.risks.length > 0 ? (
               <ul className="flex flex-col gap-2">
                 {report.risks.map((risk, idx) => (
