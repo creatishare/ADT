@@ -1,11 +1,14 @@
 /**
  * Model registry — shared metadata used by both client and server.
  *
- * Add new models here. The server-side factory (`server.ts`) resolves each
- * entry to a concrete provider via environment variables.
+ * All models now route through the company's unified AI gateway
+ * (`hetao`). The gateway is OpenAI-compatible, so every model uses
+ * the same provider, base URL, and API key — only the upstream model
+ * name differs. See `server.ts` for the UI-id → upstream-model-name
+ * mapping.
  */
 
-export type ProviderId = "google" | "openai" | "moonshot" | "deepseek" | "doubao";
+export type ProviderId = "hetao";
 
 export interface ModelMeta {
   /** Stable ID used by UI + request header. */
@@ -20,40 +23,46 @@ export interface ModelMeta {
 
 export const AVAILABLE_MODELS = [
   {
-    id: "gemini-3.1",
-    label: "Gemini 3.1",
-    hint: "Google · 综合推理强",
-    provider: "google",
+    id: "deepseek-v4-flash",
+    label: "DeepSeek V4 Flash",
+    hint: "公司网关 · 阿里中转 · 轻量快速",
+    provider: "hetao",
   },
   {
-    id: "gpt-5-4",
-    label: "GPT 5-4",
-    hint: "OpenAI · 代码与长文",
-    provider: "openai",
-  },
-  {
-    id: "kimi-k2.6",
-    label: "Kimi K2.6",
-    hint: "Moonshot · 中文长上下文",
-    provider: "moonshot",
+    id: "deepseek-v4-flash-free",
+    label: "DeepSeek V4 Flash (免费)",
+    hint: "公司网关 · 本地中转 · 免费额度",
+    provider: "hetao",
   },
   {
     id: "deepseek-v4-pro",
     label: "DeepSeek V4 Pro",
-    hint: "DeepSeek · 评分次于gemini 3.1pro",
-    provider: "deepseek",
+    hint: "公司网关 · 阿里中转 · 综合能力强",
+    provider: "hetao",
   },
   {
-    id: "doubao-seed-2.0-pro",
-    label: "Doubao Seed 2.0 Pro",
-    hint: "字节火山引擎 · 国内直连",
-    provider: "doubao",
+    id: "qwen3.6-flash",
+    label: "Qwen 3.6 Flash",
+    hint: "公司网关 · 通义千问轻量版",
+    provider: "hetao",
+  },
+  {
+    id: "gpt-5.4-mini",
+    label: "GPT 5.4 Mini",
+    hint: "公司网关 · OpenAI 轻量版",
+    provider: "hetao",
+  },
+  {
+    id: "gpt-5.5",
+    label: "GPT 5.5",
+    hint: "公司网关 · OpenAI 旗舰版",
+    provider: "hetao",
   },
 ] as const satisfies ReadonlyArray<ModelMeta>;
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
 
-export const DEFAULT_MODEL_ID: ModelId = "gemini-3.1";
+export const DEFAULT_MODEL_ID: ModelId = "deepseek-v4-pro";
 
 export function isKnownModelId(value: unknown): value is ModelId {
   return (

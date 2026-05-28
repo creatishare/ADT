@@ -9,21 +9,9 @@ import { _resetKeyPools } from "./keyPool";
 
 const ENVS = [
   "LLM_PER_KEY_CONCURRENCY",
-  "LLM_CONCURRENCY_GOOGLE",
-  "LLM_CONCURRENCY_OPENAI",
-  "LLM_CONCURRENCY_MOONSHOT",
-  "LLM_CONCURRENCY_DEEPSEEK",
-  "LLM_CONCURRENCY_DOUBAO",
-  "GOOGLE_GENERATIVE_AI_API_KEYS",
-  "GOOGLE_GENERATIVE_AI_API_KEY",
-  "OPENAI_API_KEYS",
-  "OPENAI_API_KEY",
-  "MOONSHOT_API_KEYS",
-  "MOONSHOT_API_KEY",
-  "DEEPSEEK_API_KEYS",
-  "DEEPSEEK_API_KEY",
-  "DOUBAO_API_KEYS",
-  "DOUBAO_API_KEY",
+  "LLM_CONCURRENCY_HETAO",
+  "HETAO_GATEWAY_API_KEYS",
+  "HETAO_GATEWAY_API_KEY",
 ] as const;
 
 const originals: Partial<Record<(typeof ENVS)[number], string | undefined>> = {};
@@ -152,51 +140,62 @@ describe("computeCapacity", () => {
     _resetKeyPools();
   });
 
-  it("defaults to poolSize × 3 when no overrides are set", () => {
-    process.env.GOOGLE_GENERATIVE_AI_API_KEYS = "g1,g2";
+  it("returns null (unlimited) when no concurrency env var is set", () => {
+    // Default since the company-gateway switch: client-side throttling is
+    // opt-in. Pool size is irrelevant when no env var is configured.
+    process.env.HETAO_GATEWAY_API_KEYS = "g1,g2";
     _resetKeyPools();
 
-    expect(computeCapacity("google")).toBe(6); // 2 keys × 3
+    expect(computeCapacity("hetao")).toBeNull();
   });
 
-  it("uses at least 1× per-key base when the pool is empty", () => {
-    // No keys configured — pool size is 0, but capacity should floor at
-    // perKeyBase × 1 so a missing-key request still fails with a clean
-    // error instead of hanging on a zero-capacity semaphore.
-    expect(computeCapacity("openai")).toBe(3);
+  it("returns null (unlimited) even when the pool is empty", () => {
+    // Missing keys still result in unlimited — getGate creates a pass-through
+    // semaphore. A missing-key request fails later at createModel time.
+    expect(computeCapacity("hetao")).toBeNull();
   });
 
-  it("honors LLM_PER_KEY_CONCURRENCY for the per-key base", () => {
+  it("honors LLM_PER_KEY_CONCURRENCY → poolSize × N formula", () => {
     process.env.LLM_PER_KEY_CONCURRENCY = "5";
-    process.env.MOONSHOT_API_KEYS = "m1,m2";
+    process.env.HETAO_GATEWAY_API_KEYS = "m1,m2";
     _resetKeyPools();
 
-    expect(computeCapacity("moonshot")).toBe(10);
+    expect(computeCapacity("hetao")).toBe(10);
   });
 
-  it("ignores non-positive LLM_PER_KEY_CONCURRENCY and falls back to default", () => {
+  it("ignores non-positive LLM_PER_KEY_CONCURRENCY (treated as unset)", () => {
     process.env.LLM_PER_KEY_CONCURRENCY = "-1";
-    process.env.DEEPSEEK_API_KEYS = "d1";
+    process.env.HETAO_GATEWAY_API_KEYS = "d1";
     _resetKeyPools();
 
-    expect(computeCapacity("deepseek")).toBe(3);
+    // Non-positive value is ignored; with no other env var, capacity is null.
+    expect(computeCapacity("hetao")).toBeNull();
   });
 
   it("per-provider override wins over the pool-size formula", () => {
-    process.env.GOOGLE_GENERATIVE_AI_API_KEYS = "g1,g2,g3,g4";
-    process.env.LLM_CONCURRENCY_GOOGLE = "2";
+    process.env.HETAO_GATEWAY_API_KEYS = "g1,g2,g3,g4";
+    process.env.LLM_PER_KEY_CONCURRENCY = "3";
+    process.env.LLM_CONCURRENCY_HETAO = "2";
     _resetKeyPools();
 
     // Without override this would be 4 × 3 = 12; override forces 2.
-    expect(computeCapacity("google")).toBe(2);
+    expect(computeCapacity("hetao")).toBe(2);
   });
 
-  it("ignores non-positive per-provider override", () => {
-    process.env.DOUBAO_API_KEYS = "x1";
-    process.env.LLM_CONCURRENCY_DOUBAO = "0";
+  it("ignores non-positive per-provider override and falls back", () => {
+    process.env.HETAO_GATEWAY_API_KEYS = "x1";
+    process.env.LLM_CONCURRENCY_HETAO = "0";
     _resetKeyPools();
 
-    expect(computeCapacity("doubao")).toBe(3); // falls back to poolSize × default
+    // Override invalid + no LLM_PER_KEY_CONCURRENCY → unlimited.
+    expect(computeCapacity("hetao")).toBeNull();
+  });
+
+  it("per-provider override applies even without a configured key pool", () => {
+    process.env.LLM_CONCURRENCY_HETAO = "5";
+    _resetKeyPools();
+
+    expect(computeCapacity("hetao")).toBe(5);
   });
 });
 
@@ -214,36 +213,52 @@ describe("getGate", () => {
   });
 
   it("returns the same semaphore instance across calls for the same provider", () => {
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "k";
+    process.env.HETAO_GATEWAY_API_KEY = "k";
     _resetKeyPools();
 
-    const g1 = getGate("google");
-    const g2 = getGate("google");
+    const g1 = getGate("hetao");
+    const g2 = getGate("hetao");
     expect(g1).toBe(g2);
   });
 
-  it("creates independent semaphores per provider", () => {
-    process.env.OPENAI_API_KEYS = "o1,o2";
-    process.env.DEEPSEEK_API_KEYS = "d1";
+  it("returns a pass-through semaphore (Infinity capacity) by default", () => {
+    process.env.HETAO_GATEWAY_API_KEY = "k";
     _resetKeyPools();
 
-    const openaiGate = getGate("openai");
-    const deepseekGate = getGate("deepseek");
+    const gate = getGate("hetao");
+    expect(gate.capacity).toBe(Number.POSITIVE_INFINITY);
+    expect(gate.active()).toBe(0);
+    expect(gate.queueLength()).toBe(0);
+  });
 
-    expect(openaiGate).not.toBe(deepseekGate);
-    expect(openaiGate.capacity).toBe(6); // 2 × 3
-    expect(deepseekGate.capacity).toBe(3); // 1 × 3
+  it("pass-through semaphore allows arbitrary parallelism without blocking", async () => {
+    process.env.HETAO_GATEWAY_API_KEY = "k";
+    _resetKeyPools();
+
+    const gate = getGate("hetao");
+
+    // Acquire 100 slots simultaneously — all must resolve without queueing.
+    const releases = await Promise.all(
+      Array.from({ length: 100 }, () => gate.acquire())
+    );
+    expect(gate.active()).toBe(0); // pass-through never tracks active
+    expect(gate.queueLength()).toBe(0);
+
+    // run() should resolve with task value and not block on prior acquires.
+    await expect(gate.run(async () => "ok")).resolves.toBe("ok");
+
+    for (const release of releases) release();
   });
 
   it("_resetGates() forces fresh capacity computation from current env", () => {
-    process.env.MOONSHOT_API_KEYS = "m1";
+    process.env.HETAO_GATEWAY_API_KEYS = "m1";
     _resetKeyPools();
-    const first = getGate("moonshot");
-    expect(first.capacity).toBe(3);
+    const first = getGate("hetao");
+    expect(first.capacity).toBe(Number.POSITIVE_INFINITY);
 
-    process.env.LLM_CONCURRENCY_MOONSHOT = "10";
+    process.env.LLM_CONCURRENCY_HETAO = "10";
     _resetGates();
-    const second = getGate("moonshot");
+    const second = getGate("hetao");
     expect(second).not.toBe(first);
     expect(second.capacity).toBe(10);
   });

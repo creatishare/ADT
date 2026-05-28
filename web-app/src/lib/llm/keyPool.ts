@@ -20,14 +20,10 @@ interface Pool {
 }
 
 const ENV_SPECS: Record<ProviderId, { plural: string; singular: string }> = {
-  google: {
-    plural: "GOOGLE_GENERATIVE_AI_API_KEYS",
-    singular: "GOOGLE_GENERATIVE_AI_API_KEY",
+  hetao: {
+    plural: "HETAO_GATEWAY_API_KEYS",
+    singular: "HETAO_GATEWAY_API_KEY",
   },
-  openai: { plural: "OPENAI_API_KEYS", singular: "OPENAI_API_KEY" },
-  moonshot: { plural: "MOONSHOT_API_KEYS", singular: "MOONSHOT_API_KEY" },
-  deepseek: { plural: "DEEPSEEK_API_KEYS", singular: "DEEPSEEK_API_KEY" },
-  doubao: { plural: "DOUBAO_API_KEYS", singular: "DOUBAO_API_KEY" },
 };
 
 const pools = new Map<ProviderId, Pool>();

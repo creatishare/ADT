@@ -13,7 +13,7 @@ describe("memoryCache", () => {
   });
 
   it("returns undefined on miss and stores/returns the value on hit", () => {
-    const key = getMemoryCacheKey("hello", "gemini-3.1");
+    const key = getMemoryCacheKey("hello", "deepseek-v4-flash");
     expect(getMemoryCacheEntry(key)).toBeUndefined();
 
     setMemoryCacheEntry(key, "ctx");
@@ -21,14 +21,14 @@ describe("memoryCache", () => {
   });
 
   it("produces different keys for different model ids on the same transcript", () => {
-    const a = getMemoryCacheKey("transcript", "gemini-3.1");
+    const a = getMemoryCacheKey("transcript", "deepseek-v4-flash");
     const b = getMemoryCacheKey("transcript", "deepseek-v4-pro");
     expect(a).not.toBe(b);
   });
 
   it("produces the same key for identical (transcript, model) pairs", () => {
-    const a = getMemoryCacheKey("same", "gemini-3.1");
-    const b = getMemoryCacheKey("same", "gemini-3.1");
+    const a = getMemoryCacheKey("same", "deepseek-v4-flash");
+    const b = getMemoryCacheKey("same", "deepseek-v4-flash");
     expect(a).toBe(b);
   });
 

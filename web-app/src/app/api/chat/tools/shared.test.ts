@@ -172,7 +172,7 @@ describe("classifySubAgentError", () => {
 describe("runSubAgentText (streaming path)", () => {
   const SHARED_ARGS = {
     model: {} as never,
-    modelId: "kimi-k2.6" as const,
+    modelId: "qwen3.6-flash" as const,
     system: "system",
     prompt: "prompt",
   };

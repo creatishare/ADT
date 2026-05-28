@@ -127,7 +127,7 @@ describe("designStageFile · schema path (provider supports structured output)",
 
     const result = await __testables.runGenerateConceptsWithLint({
       subAgentModel: fakeModel,
-      modelId: "gemini-3.1",
+      modelId: "deepseek-v4-flash",
       system: "test",
       prompt: "生成 5 个概念",
       timeoutMs: 60_000,
@@ -149,7 +149,7 @@ describe("designStageFile · schema path (provider supports structured output)",
 
     const result = await __testables.runGenerateConceptsWithLint({
       subAgentModel: fakeModel,
-      modelId: "gemini-3.1",
+      modelId: "deepseek-v4-flash",
       system: "test",
       prompt: "生成 5 个概念",
       timeoutMs: 60_000,
@@ -175,7 +175,7 @@ describe("designStageFile · schema path (provider supports structured output)",
 
     const result = await __testables.runGenerateConceptsWithLint({
       subAgentModel: fakeModel,
-      modelId: "gemini-3.1",
+      modelId: "deepseek-v4-flash",
       system: "test",
       prompt: "生成 5 个概念",
       timeoutMs: 60_000,
@@ -286,7 +286,7 @@ describe("designStageFile · text fallback when provider rejects schema mode", (
     await expect(
       __testables.runGenerateConceptsWithLint({
         subAgentModel: fakeModel,
-        modelId: "gemini-3.1",
+        modelId: "deepseek-v4-flash",
         system: "test",
         prompt: "生成 5 个概念",
         timeoutMs: 60_000,
