@@ -29,8 +29,23 @@ import {
 } from "@/lib/chat/memoryCache";
 import { logChatDebug } from "@/lib/chat/debug";
 
-// Allow streaming responses up to 60 seconds
-export const maxDuration = 60;
+// Function wall-clock budget. Heavy sub-agents (validate/write) run up to
+// 120s (generateText) / 180s (streaming) INSIDE a tool call while the stream
+// is open, so a 60s cap would kill the function mid-stream and surface to the
+// browser as "failed to fetch". Sized to cover the worst-case heavy sub-agent
+// plus orchestrator overhead. NOTE: the hosting plan must permit this value
+// (e.g. Vercel Hobby caps at 60s); on a capped plan, lower sub-agent budgets
+// accordingly.
+export const maxDuration = 300;
+
+// Hard ceiling for the memory-extraction LLM call. Memory extraction runs on
+// the *critical path* — it is awaited before `streamText` begins, so any stall
+// blocks the entire response with zero bytes sent to the client (observed as
+// "failed to fetch" the first time history exceeds MAX_RECENT_MESSAGES on a
+// slow reasoning model). It is a best-effort enhancement, so we bound it
+// tightly and degrade to an empty context on timeout instead of hanging.
+const MEMORY_EXTRACTION_TIMEOUT_MS = 25_000;
+const MEMORY_EXTRACTION_MAX_RETRIES = 1;
 
 type ChatTestScenario =
   | "success"
@@ -367,6 +382,18 @@ function extractLatestGuidance(messages: RequestMessage[]): string {
   return "";
 }
 
+/**
+ * Recover the kickoff "head-anchor" user message (the first user message,
+ * which carries the full lesson knowledge doc + worldview — see the
+ * `applyHeadAnchorWindow` doc). Used as a server-side fallback for
+ * validate/write sub-agents when the Orchestrator omits or truncates the
+ * `worldview` / `topicInfo` tool args under long-document pressure.
+ */
+function extractHeadAnchorSourceMaterial(messages: RequestMessage[]): string {
+  const firstUser = messages.find((m) => m.role === "user");
+  return firstUser ? getMessageText(firstUser) : "";
+}
+
 // ---------------------------------------------------------------------------
 // Memory
 // ---------------------------------------------------------------------------
@@ -405,7 +432,10 @@ async function buildMemoryContext(
       generateObject({
         model,
         output: "no-schema",
-        maxRetries: 3,
+        // Bounded so a slow reasoning model can never stall the critical path.
+        // On timeout the surrounding try/catch degrades to an empty context.
+        maxRetries: MEMORY_EXTRACTION_MAX_RETRIES,
+        timeout: MEMORY_EXTRACTION_TIMEOUT_MS,
         system:
           "你是多智能体工作流的记忆提取器。你的职责是从完整历史中提取真正需要长期保留的用户约束、当前流程状态与最近已完成工具。不要复述闲聊，不要编造。",
         prompt: `请从下面完整历史中提取结构化记忆，并以 JSON 对象输出。\n\n输出要求（严格 JSON）：\n{\n  "userConstraints": string[],  // 用户明确要求长期遵守的偏好、禁忌、风格和硬规则，最多 ${MAX_MEMORY_ITEMS} 条\n  "workflowState": string[],    // 已确认的流程状态、人工决策、当前推进阶段，最多 ${MAX_MEMORY_ITEMS} 条\n  "recentTools": string[]       // 最近已完成且对后续有依赖关系的工具，最多 ${MAX_MEMORY_ITEMS} 条\n}\n\n完整历史：\n${transcript}`,
@@ -542,6 +572,7 @@ export async function POST(req: Request) {
   }
 
   const fallbackGuidance = extractLatestGuidance(requestMessages);
+  const fallbackSourceMaterial = extractHeadAnchorSourceMaterial(requestMessages);
 
   if (debugEnabled && fallbackGuidance) {
     logChatDebug("request.fallback-guidance", {
@@ -638,8 +669,8 @@ export async function POST(req: Request) {
       },
       tools: {
         designStageFile: createDesignStageFileTool(subAgentModel, modelId, fallbackGuidance),
-        writeStageFile: createWriteStageFileTool(subAgentModel, modelId, fallbackGuidance),
-        validateStageFile: createValidateStageFileTool(subAgentModel, modelId, fallbackGuidance),
+        writeStageFile: createWriteStageFileTool(subAgentModel, modelId, fallbackGuidance, fallbackSourceMaterial),
+        validateStageFile: createValidateStageFileTool(subAgentModel, modelId, fallbackGuidance, fallbackSourceMaterial),
         generateVisualDesign: createGenerateVisualDesignTool(subAgentModel, modelId, fallbackGuidance),
       },
     });
