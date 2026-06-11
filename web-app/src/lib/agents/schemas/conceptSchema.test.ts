@@ -3,6 +3,7 @@ import {
   ConceptListSchema,
   ConceptSchema,
   ProductionDifficulty,
+  findDuplicateMechanisms,
   flattenConceptForLint,
   serializeConcept,
   serializeConceptList,
@@ -12,6 +13,7 @@ import {
 const validConcept = {
   title: "火星探测车采集样本",
   themeDimension: "航天探索" as const,
+  stageMechanism: "计数收集" as const,
   oneLineWrapper: "火星探测车在标记点循环采集 N 块岩石样本",
   dramaticConflict: {
     blocker:
@@ -43,10 +45,30 @@ const validConcept = {
 const validList: ConceptList = {
   concepts: [
     validConcept,
-    { ...validConcept, title: "工厂传送带打包箱子", themeDimension: "机械工程" },
-    { ...validConcept, title: "温室浇花机定时浇水", themeDimension: "农业种植" },
-    { ...validConcept, title: "考古队拓印石碑", themeDimension: "考古探险" },
-    { ...validConcept, title: "实验室试管循环加热", themeDimension: "科学实验" },
+    {
+      ...validConcept,
+      title: "工厂传送带打包箱子",
+      themeDimension: "机械工程",
+      stageMechanism: "分类配对",
+    },
+    {
+      ...validConcept,
+      title: "温室浇花机定时浇水",
+      themeDimension: "农业种植",
+      stageMechanism: "路径移动",
+    },
+    {
+      ...validConcept,
+      title: "考古队拓印石碑",
+      themeDimension: "考古探险",
+      stageMechanism: "显示反馈",
+    },
+    {
+      ...validConcept,
+      title: "实验室试管循环加热",
+      themeDimension: "科学实验",
+      stageMechanism: "信号切换",
+    },
   ],
 };
 
@@ -97,6 +119,17 @@ describe("ConceptSchema", () => {
     const broken = { ...validConcept, themeDimension: "异世界冒险" };
     const r = ConceptSchema.safeParse(broken);
     expect(r.success).toBe(false);
+  });
+
+  it("rejects unknown stageMechanism", () => {
+    const broken = { ...validConcept, stageMechanism: "魔法飞行" };
+    expect(ConceptSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it("requires stageMechanism (missing field fails schema)", () => {
+    const missing = { ...validConcept } as Record<string, unknown>;
+    delete missing.stageMechanism;
+    expect(ConceptSchema.safeParse(missing).success).toBe(false);
   });
 
   it("rejects title longer than 20 characters", () => {
@@ -171,6 +204,35 @@ describe("ConceptListSchema", () => {
   });
 });
 
+describe("findDuplicateMechanisms", () => {
+  it("returns empty when all 5 mechanisms are pairwise distinct", () => {
+    expect(findDuplicateMechanisms(validList)).toEqual([]);
+  });
+
+  it("reports each duplicated mechanism once", () => {
+    const homogenized: ConceptList = {
+      concepts: validList.concepts.map((c) => ({
+        ...c,
+        stageMechanism: "计数收集",
+      })),
+    };
+    expect(findDuplicateMechanisms(homogenized)).toEqual(["计数收集"]);
+  });
+
+  it("reports multiple duplicated mechanisms", () => {
+    const twoPairs: ConceptList = {
+      concepts: [
+        { ...validList.concepts[0], stageMechanism: "计数收集" },
+        { ...validList.concepts[1], stageMechanism: "计数收集" },
+        { ...validList.concepts[2], stageMechanism: "信号切换" },
+        { ...validList.concepts[3], stageMechanism: "信号切换" },
+        { ...validList.concepts[4], stageMechanism: "路径移动" },
+      ],
+    };
+    expect(findDuplicateMechanisms(twoPairs)).toEqual(["计数收集", "信号切换"]);
+  });
+});
+
 describe("serializeConcept / serializeConceptList", () => {
   it("renders a single concept to markdown with the canonical 3-column mapping table", () => {
     const md = serializeConcept(validConcept, 1);
@@ -178,6 +240,11 @@ describe("serializeConcept / serializeConceptList", () => {
     expect(md).toContain("| 代码结构 | 执行阶段 | 舞台表现 |");
     expect(md).toContain("| for 循环 | 进入 | 机械臂启动到位 |");
     expect(md).toContain("**制作难度自评**：简单");
+  });
+
+  it("renders the stageMechanism line so human pickers can see the gameplay skeleton", () => {
+    const md = serializeConcept(validConcept, 1);
+    expect(md).toContain("**舞台机制**：计数收集");
   });
 
   it("renders the dramaticConflict block with all three sub-points", () => {

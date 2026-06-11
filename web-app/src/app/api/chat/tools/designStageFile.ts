@@ -9,9 +9,11 @@ import {
 } from "@/lib/agents/rules";
 import {
   ConceptListSchema,
+  findDuplicateMechanisms,
   flattenConceptListForLint,
   serializeConceptList,
   type ConceptList,
+  type StageMechanism,
 } from "@/lib/agents/schemas";
 import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
@@ -134,6 +136,25 @@ interface ConceptGenResult {
   markdown: string;
   /** Lint hits remaining after the retry budget is exhausted (empty = clean). */
   lintHitsAfterRetry: LintHit[];
+  /**
+   * Stage mechanisms still duplicated across concepts after the retry budget
+   * is exhausted (empty = 机制差异化达标). Only the schema path can populate
+   * this — the text fallback has no structured list to inspect.
+   */
+  mechanismDupesAfterRetry: StageMechanism[];
+}
+
+/**
+ * 机制重复的再生成反馈段（与 formatLintFeedback 风格一致）。
+ * 空数组返回空串，方便与 lint 反馈拼接。
+ */
+function formatMechanismFeedback(dupes: readonly StageMechanism[]): string {
+  if (dupes.length === 0) return "";
+  return [
+    "⚠️ 机制差异化检查未通过：以下舞台机制被多个概念重复使用——5 个概念的舞台机制必须两两不同：",
+    ...dupes.map((d) => `  - "${d}" 出现在 2 个以上概念中`),
+    "请保留其中最贴合本题组代码结构的那一个概念，其余概念替换为尚未使用的舞台机制（从机制清单中选），并整体重新输出完整 5 个概念。",
+  ].join("\n");
 }
 
 interface RunArgs {
@@ -209,11 +230,19 @@ async function runViaSchema(args: RunArgs): Promise<ConceptGenResult> {
   while (attempt < LINT_MAX_RETRIES) {
     const flat = flattenConceptListForLint(list);
     const hits = lintText(flat);
-    if (hits.length === 0) {
-      return { markdown: serializeConceptList(list), lintHitsAfterRetry: [] };
+    const dupes = findDuplicateMechanisms(list);
+    if (hits.length === 0 && dupes.length === 0) {
+      return {
+        markdown: serializeConceptList(list),
+        lintHitsAfterRetry: [],
+        mechanismDupesAfterRetry: [],
+      };
     }
 
-    currentPrompt = `${prompt}\n\n---\n\n${formatLintFeedback(hits)}`;
+    const feedback = [formatLintFeedback(hits), formatMechanismFeedback(dupes)]
+      .filter(Boolean)
+      .join("\n\n");
+    currentPrompt = `${prompt}\n\n---\n\n${feedback}`;
     list = await runSubAgentObject({
       model: subAgentModel,
       modelId,
@@ -229,6 +258,7 @@ async function runViaSchema(args: RunArgs): Promise<ConceptGenResult> {
   return {
     markdown: serializeConceptList(list),
     lintHitsAfterRetry: finalHits,
+    mechanismDupesAfterRetry: findDuplicateMechanisms(list),
   };
 }
 
@@ -257,7 +287,7 @@ async function runViaText(args: RunArgs): Promise<ConceptGenResult> {
   while (attempt < LINT_MAX_RETRIES) {
     const hits = lintText(text);
     if (hits.length === 0) {
-      return { markdown: text, lintHitsAfterRetry: [] };
+      return { markdown: text, lintHitsAfterRetry: [], mechanismDupesAfterRetry: [] };
     }
 
     currentPrompt = `${prompt}\n\n---\n\n${formatLintFeedback(hits)}`;
@@ -272,7 +302,7 @@ async function runViaText(args: RunArgs): Promise<ConceptGenResult> {
   }
 
   const finalHits = lintText(text);
-  return { markdown: text, lintHitsAfterRetry: finalHits };
+  return { markdown: text, lintHitsAfterRetry: finalHits, mechanismDupesAfterRetry: [] };
 }
 
 export function createDesignStageFileTool(
@@ -292,19 +322,24 @@ export function createDesignStageFileTool(
 
       let text: string;
       if (input.mode === "generate_concepts") {
-        const { markdown, lintHitsAfterRetry } = await runGenerateConceptsWithLint({
-          subAgentModel,
-          modelId,
-          system: DESIGNER_PROMPT,
-          prompt,
-          timeoutMs,
-        });
+        const { markdown, lintHitsAfterRetry, mechanismDupesAfterRetry } =
+          await runGenerateConceptsWithLint({
+            subAgentModel,
+            modelId,
+            system: DESIGNER_PROMPT,
+            prompt,
+            timeoutMs,
+          });
         text = markdown;
-        // 若重试后仍命中黑名单，前端用户依然能看到内容（不阻断），
-        // 但在文档末尾追加 lint 警告段，方便编辑核对。
+        // 若重试后仍命中黑名单 / 机制重复，前端用户依然能看到内容（不阻断），
+        // 但在文档末尾追加警告段，方便编辑核对。
         if (lintHitsAfterRetry.length > 0) {
           text +=
             "\n\n---\n\n> ⚠️ **自动 lint 检测**：仍有黑名单词汇未被替换，请人工复核。\n";
+        }
+        if (mechanismDupesAfterRetry.length > 0) {
+          text +=
+            `\n\n---\n\n> ⚠️ **机制差异化检测**：舞台机制「${mechanismDupesAfterRetry.join("、")}」仍被多个概念重复使用，挑选时请注意避开同质概念。\n`;
         }
       } else {
         text = await runSubAgentText({

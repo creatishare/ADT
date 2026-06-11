@@ -59,6 +59,28 @@ export const ThemeDimension = z.enum([
 export type ThemeDimension = z.infer<typeof ThemeDimension>;
 
 /**
+ * 舞台机制候选（与 DESIGNER_PROMPT "差异化要求"的第二轴对齐）。
+ *
+ * 背景：只约束"题材维度"会产生换皮不换骨的同质概念——火星车抓岩石、
+ * 农场机器人摘果子、仓库机械臂分拣，题材不同但舞台机制全是"抓取 N 个
+ * 物品进容器"。机制轴把差异化下探到玩法层。
+ *
+ * 每种机制都由白名单动作（平移/旋转/亮灭/数字弹出…）+ 白名单名词组合
+ * 而成，保证机制多样性不会顶破制作可行性红线。
+ */
+export const StageMechanism = z.enum([
+  "计数收集",
+  "信号切换",
+  "路径移动",
+  "层级升降",
+  "开关闸门",
+  "分类配对",
+  "显示反馈",
+  "搭建堆叠",
+]);
+export type StageMechanism = z.infer<typeof StageMechanism>;
+
+/**
  * 制作难度自评（路径 A 的硬性约束之一）。
  * 注意：**没有"困难"枚举**——即使 LLM 想输出，schema 也会拒绝。
  */
@@ -128,6 +150,9 @@ export const ConceptSchema = z.object({
     .max(20)
     .describe("不超过 20 字的概念标题，精炼具象"),
   themeDimension: ThemeDimension,
+  stageMechanism: StageMechanism.describe(
+    "本概念的核心舞台机制（玩法骨架）；5 个概念的舞台机制必须两两不同",
+  ),
   oneLineWrapper: z
     .string()
     .min(8)
@@ -163,12 +188,37 @@ export const ConceptSchema = z.object({
 export type Concept = z.infer<typeof ConceptSchema>;
 
 /**
- * 五个概念的列表，恰好 5 项。题材维度需覆盖至少 3 种。
+ * 五个概念的列表，恰好 5 项。题材维度需覆盖至少 3 种，舞台机制两两不同。
+ *
+ * 注意：机制两两不同**不写进 Zod refine**——refine 不会进入发给 provider 的
+ * JSON schema，校验失败会被 classifySubAgentError 误判为 schema_parse_failed
+ * 触发降级 text 路径。改为在 designStageFile 的 lint+retry 闭环里用
+ * `findDuplicateMechanisms` 检查并反馈再生成。
  */
 export const ConceptListSchema = z.object({
   concepts: z
     .array(ConceptSchema)
     .length(5)
-    .describe("恰好 5 个差异化的概念，覆盖至少 3 种题材维度"),
+    .describe(
+      "恰好 5 个差异化的概念，覆盖至少 3 种题材维度，且 5 个概念的舞台机制两两不同",
+    ),
 });
 export type ConceptList = z.infer<typeof ConceptListSchema>;
+
+/**
+ * 找出在多个概念间重复使用的舞台机制（按首次重复顺序去重输出）。
+ *
+ * 返回空数组 = 机制差异化达标。结果用于 lint+retry 闭环的反馈提示，
+ * 以及 retry 预算用尽后在 markdown 末尾追加人工复核警告。
+ */
+export function findDuplicateMechanisms(list: ConceptList): StageMechanism[] {
+  const seen = new Set<StageMechanism>();
+  const dupes = new Set<StageMechanism>();
+  for (const c of list.concepts) {
+    if (seen.has(c.stageMechanism)) {
+      dupes.add(c.stageMechanism);
+    }
+    seen.add(c.stageMechanism);
+  }
+  return [...dupes];
+}

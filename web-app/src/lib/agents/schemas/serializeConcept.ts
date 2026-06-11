@@ -23,6 +23,7 @@ export function serializeConcept(c: Concept, n: number): string {
     `## 概念 ${n}：${c.title}`,
     "",
     `- **题材维度**：${c.themeDimension}`,
+    `- **舞台机制**：${c.stageMechanism}`,
     `- **一句话包装**：${c.oneLineWrapper}`,
     `- **剧情冲突 (Why this code is the ONLY way)**：`,
     `  - **角色被什么卡住**：${dc.blocker}`,

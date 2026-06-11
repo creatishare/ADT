@@ -584,3 +584,50 @@ describe("prompts: structured accumulatedGuidance & scope isolation", () => {
     });
   });
 });
+
+// ----------------------------------------------------------------------------
+// 第六批：题材 × 机制双轴差异化（2026-06-11 反同质化）
+// 只约束题材会产生"换皮不换骨"的同质概念——5 个概念题材不同但玩法全是
+// "抓取 N 个物品进容器"。机制轴把差异化下探到玩法骨架层，并由服务端
+// findDuplicateMechanisms 在 lint+retry 闭环里硬校验。
+// ----------------------------------------------------------------------------
+
+describe("prompts: theme × mechanism dual-axis differentiation", () => {
+  describe("DESIGNER_PROMPT (generate_concepts)", () => {
+    it("requires pairwise-distinct stage mechanisms across the 5 concepts", () => {
+      expect(DESIGNER_PROMPT).toContain("舞台机制");
+      expect(DESIGNER_PROMPT).toMatch(/舞台机制[\s\S]{0,120}两两不同/);
+    });
+
+    it("lists all 8 mechanism candidates aligned with the StageMechanism enum", () => {
+      for (const m of [
+        "计数收集",
+        "信号切换",
+        "路径移动",
+        "层级升降",
+        "开关闸门",
+        "分类配对",
+        "显示反馈",
+        "搭建堆叠",
+      ]) {
+        expect(DESIGNER_PROMPT).toContain(m);
+      }
+    });
+
+    it("frames theme as skin and mechanism as skeleton (anti-reskin rule)", () => {
+      // "题材是皮，机制是骨"——换皮不换机制属于同质化
+      expect(DESIGNER_PROMPT).toMatch(/题材[\s\S]{0,30}皮[\s\S]{0,60}机制[\s\S]{0,30}骨/);
+    });
+
+    it("warns that examples are illustrative, not theme recommendations (anti-anchoring)", () => {
+      // few-shot 示例锚定效应：必须显式声明示例不是题材推荐
+      expect(DESIGNER_PROMPT).toMatch(/不是[\s\S]{0,10}(题材|推荐)|不要把你的 5 个概念都写成示例同款/);
+    });
+
+    it("includes good examples from at least two non-collection mechanisms", () => {
+      // 好例不能全是"计数收集"——信号切换 / 层级升降至少各有一个
+      expect(DESIGNER_PROMPT).toMatch(/好例[\s\S]{0,40}信号切换/);
+      expect(DESIGNER_PROMPT).toMatch(/好例[\s\S]{0,40}层级升降/);
+    });
+  });
+});

@@ -77,10 +77,19 @@ describe("designStageFile inputSchema", () => {
 // generate_concepts 路径：schema + lint+retry 闭环
 // -----------------------------------------------------------------------------
 
+const DISTINCT_MECHANISMS = [
+  "计数收集",
+  "信号切换",
+  "路径移动",
+  "层级升降",
+  "显示反馈",
+] as const;
+
 const cleanConceptList: ConceptList = {
   concepts: Array.from({ length: 5 }, (_, i) => ({
     title: `干净概念 ${i + 1}`,
     themeDimension: "机械工程" as const,
+    stageMechanism: DISTINCT_MECHANISMS[i]!,
     oneLineWrapper: `工程车在传送带循环 ${i + 1} 次抓取货物`,
     dramaticConflict: {
       blocker: `${i + 1} 件不同形状的货物分散在传送带不同位置，机械臂一次只能夹一件`,
@@ -193,6 +202,62 @@ describe("designStageFile · schema path (provider supports structured output)",
     expect(result.lintHitsAfterRetry.length).toBeGreaterThan(0);
     const offendingWords = result.lintHitsAfterRetry.map((h) => h.word);
     expect(offendingWords).toContain("引力锚");
+
+    spy.mockRestore();
+  });
+
+  it("retries with mechanism feedback when stage mechanisms are duplicated (同质化红线)", async () => {
+    // 5 个概念全部用同一机制——典型"换皮不换骨"
+    const homogenizedList: ConceptList = {
+      concepts: cleanConceptList.concepts.map((c) => ({
+        ...c,
+        stageMechanism: "计数收集",
+      })),
+    };
+    const spy = vi
+      .spyOn(shared, "runSubAgentObject")
+      .mockResolvedValueOnce(homogenizedList) // 第一次：机制全重复
+      .mockResolvedValueOnce(cleanConceptList); // 第二次：两两不同
+
+    const result = await __testables.runGenerateConceptsWithLint({
+      subAgentModel: fakeModel,
+      modelId: "deepseek-v4-flash",
+      system: "test",
+      prompt: "生成 5 个概念",
+      timeoutMs: 60_000,
+    });
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    const secondCallArgs = spy.mock.calls[1]?.[0];
+    expect(secondCallArgs?.prompt).toContain("机制差异化检查未通过");
+    expect(secondCallArgs?.prompt).toContain("计数收集");
+    expect(result.mechanismDupesAfterRetry).toEqual([]);
+    expect(result.lintHitsAfterRetry).toEqual([]);
+
+    spy.mockRestore();
+  });
+
+  it("surfaces remaining mechanism dupes after retry cap (graceful degrade, no block)", async () => {
+    const homogenizedList: ConceptList = {
+      concepts: cleanConceptList.concepts.map((c) => ({
+        ...c,
+        stageMechanism: "计数收集",
+      })),
+    };
+    const spy = vi
+      .spyOn(shared, "runSubAgentObject")
+      .mockResolvedValue(homogenizedList);
+
+    const result = await __testables.runGenerateConceptsWithLint({
+      subAgentModel: fakeModel,
+      modelId: "deepseek-v4-flash",
+      system: "test",
+      prompt: "生成 5 个概念",
+      timeoutMs: 60_000,
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1 + __testables.LINT_MAX_RETRIES);
+    expect(result.mechanismDupesAfterRetry).toEqual(["计数收集"]);
 
     spy.mockRestore();
   });
@@ -329,7 +394,7 @@ describe("designStageFile · text fallback when LLM output fails schema validati
 
     const result = await __testables.runGenerateConceptsWithLint({
       subAgentModel: fakeModel,
-      modelId: "gemini-3.1",
+      modelId: "gpt-5.5",
       system: "test",
       prompt: "生成 5 个概念",
       timeoutMs: 60_000,
@@ -355,7 +420,7 @@ describe("designStageFile · text fallback when LLM output fails schema validati
 
     const result = await __testables.runGenerateConceptsWithLint({
       subAgentModel: fakeModel,
-      modelId: "gemini-3.1",
+      modelId: "gpt-5.5",
       system: "test",
       prompt: "生成 5 个概念",
       timeoutMs: 60_000,

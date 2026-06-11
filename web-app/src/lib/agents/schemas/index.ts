@@ -1,11 +1,13 @@
 export {
   ExecutionPhase,
   ThemeDimension,
+  StageMechanism,
   ProductionDifficulty,
   CodeMappingRow,
   DramaticConflict,
   ConceptSchema,
   ConceptListSchema,
+  findDuplicateMechanisms,
   type Concept,
   type ConceptList,
 } from "./conceptSchema";
