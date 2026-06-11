@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMarkdown, parseValidationReport } from "./artifactParser";
+import {
+  normalizeMarkdown,
+  parseOrchestratorState,
+  parseValidationReport,
+  serializeStateGuidance,
+} from "./artifactParser";
 
 describe("normalizeMarkdown — code-fence stripping", () => {
   it("strips a single internal ```markdown fence around a table", () => {
@@ -165,5 +170,157 @@ describe("parseValidationReport — dimension score extraction", () => {
     const report = parseValidationReport(sampleReport);
     expect(report.conclusion).toBe("不通过，需修改");
     expect(report.suggestions.length).toBeGreaterThan(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 2026-05-14 第 3 步：VALIDATOR_PROMPT 加第 5 维度"知识点必要性"，总分 20→25。
+  // Parser 本来就是按行 X/Y 解析、与总分无关——这里加防御性测试，保证未来
+  // 改维度数量不会让 parser 静默漂移。
+  // ---------------------------------------------------------------------------
+
+  it("parses the new 5-dimension / 25-total report shape (with 知识点必要性)", () => {
+    const fiveDimReport = `## 验证报告
+
+### 总体结论
+**通过** 总分：22/25
+
+### 评分明细
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 非魔法性 | 5/5 | 所有现象均为科技设备 |
+| 代码-舞台一致性 | 4/5 | 题组3 递归归出动画偏弱 |
+| 知识点必要性 | 4/5 | 替换测试：题组1 平铺写法因份数未知失败 ✅ |
+| 儿童认知适配 | 4/5 | 节奏适合 8-12 岁 |
+| 剧情连贯性 | 5/5 | 物理状态钩子接力顺畅 |
+`;
+    const report = parseValidationReport(fiveDimReport);
+    expect(report.dimensions).toHaveLength(5);
+    const names = report.dimensions.map((d) => d.name);
+    expect(names).toContain("知识点必要性");
+    const necessity = report.dimensions.find((d) => d.name === "知识点必要性");
+    expect(necessity).toMatchObject({
+      score: "4/5",
+      scoreValue: 4,
+      maxScore: 5,
+      passed: false, // 4 != 5
+    });
+    expect(report.conclusion).toBe("通过");
+  });
+
+  it('silently skips N/A rows from [mode:single-group] reports (剧情连贯性 = N/A)', () => {
+    const singleGroupReport = `## 验证报告
+
+### 总体结论
+**通过** 总分：18/20
+
+### 评分明细
+| 维度 | 得分 | 说明 |
+|------|------|------|
+| 非魔法性 | 5/5 | 完全科学具象 |
+| 代码-舞台一致性 | 4/5 | 微缺漏 |
+| 知识点必要性 | 5/5 | 替换测试 ✅ |
+| 儿童认知适配 | 4/5 | 节奏适合 |
+| 剧情连贯性 | N/A | 单题组无上下游 |
+`;
+    const report = parseValidationReport(singleGroupReport);
+    // N/A 行被静默跳过（regex 不匹配 X/Y）；只剩 4 条可解析维度
+    expect(report.dimensions).toHaveLength(4);
+    expect(report.dimensions.map((d) => d.name)).not.toContain("剧情连贯性");
+    expect(report.dimensions.find((d) => d.name === "知识点必要性")?.scoreValue).toBe(5);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// parseOrchestratorState — structured guidance accumulator
+// ----------------------------------------------------------------------------
+
+describe("parseOrchestratorState — structured accumulatedGuidance", () => {
+  function wrapState(json: string): string {
+    return ["pre-text", "```state", json, "```", "post-text"].join("\n");
+  }
+
+  it("parses a structured GuidanceModel from the state block", () => {
+    const json = JSON.stringify({
+      currentStep: 2,
+      processedGroups: ["题组1"],
+      pendingGroups: ["题组2"],
+      accumulatedGuidance: {
+        logicVisualPatterns: [
+          {
+            construct: "for循环退出",
+            pattern: "计数器跳动+绿灯亮",
+            polarity: "prefer",
+          },
+        ],
+        wordingStyle: ["现在时"],
+        avoidances: [],
+        perGroupTheme: {
+          "L3-1-高-题组1": { theme: "航天探索" },
+        },
+        mode: "standard",
+      },
+    });
+
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state).not.toBeNull();
+    expect(state?.accumulatedGuidance.logicVisualPatterns).toHaveLength(1);
+    expect(state?.accumulatedGuidance.wordingStyle).toEqual(["现在时"]);
+    expect(state?.accumulatedGuidance.perGroupTheme["L3-1-高-题组1"]?.theme).toBe(
+      "航天探索",
+    );
+    expect(state?.guidanceLines).toContain("✓ for循环退出 → 计数器跳动+绿灯亮");
+    expect(state?.guidanceLines).toContain("现在时");
+  });
+
+  it("falls back gracefully when accumulatedGuidance is a legacy string[]", () => {
+    const json = JSON.stringify({
+      currentStep: 1,
+      accumulatedGuidance: ["legacy line A", "legacy line B"],
+    });
+
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state).not.toBeNull();
+    expect(state?.accumulatedGuidance.wordingStyle).toEqual([
+      "legacy line A",
+      "legacy line B",
+    ]);
+    expect(state?.guidanceLines).toEqual(["legacy line A", "legacy line B"]);
+  });
+
+  it("returns empty guidance when accumulatedGuidance is missing", () => {
+    const json = JSON.stringify({ currentStep: 1 });
+    const state = parseOrchestratorState(wrapState(json));
+    expect(state?.accumulatedGuidance.logicVisualPatterns).toEqual([]);
+    expect(state?.accumulatedGuidance.perGroupTheme).toEqual({});
+    expect(state?.guidanceLines).toEqual([]);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// serializeStateGuidance — per-group theme isolation regression test
+// ----------------------------------------------------------------------------
+
+describe("serializeStateGuidance — per-group theme isolation", () => {
+  it("never includes theme entries for groups other than the active courseCode", () => {
+    const json = JSON.stringify({
+      accumulatedGuidance: {
+        perGroupTheme: {
+          "L3-1-高-题组1": { theme: "航天探索" },
+          "L3-1-高-题组2": { theme: "机械工程" },
+        },
+      },
+    });
+    const state = parseOrchestratorState(
+      ["```state", json, "```"].join("\n"),
+    );
+    expect(state).not.toBeNull();
+
+    const forGroup2 = serializeStateGuidance(state!, "L3-1-高-题组2");
+    expect(forGroup2).toContain("机械工程");
+    expect(forGroup2).not.toContain("航天探索");
+
+    const crossGroup = serializeStateGuidance(state!);
+    expect(crossGroup).not.toContain("机械工程");
+    expect(crossGroup).not.toContain("航天探索");
   });
 });

@@ -16,6 +16,7 @@ import {
 import type { ModelId } from "@/lib/llm/providers";
 import type { ToolOutput } from "./types";
 import {
+  isSchemaPathRecoverableError,
   isUnsupportedResponseFormatError,
   runSubAgentObject,
   runSubAgentText,
@@ -45,7 +46,13 @@ export const designStageFileInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "【极其重要】从对话历史中总结出的用户指导、偏好、修改意见和避坑规则。必须传递给子Agent！"
+      "【极其重要】将 State Block 的 accumulatedGuidance 按段落格式序列化后传入：\n" +
+        "- `[mode:single-group|integration|standard]`（首行）\n" +
+        "- `## 跨题组逻辑↔舞台映射偏好`（每行 `✓/✗ 代码结构 → 舞台模式`，长期跨题组）\n" +
+        "- `## 用词与排版偏好`（长期跨题组）\n" +
+        "- `## 用户明确禁忌`（长期跨题组）\n" +
+        "- `## 当前题组题材（仅 <courseCode>）`（**仅** generate_concepts 模式且 perGroupTheme 含当前 courseCode 时输出；其它题组的题材**严禁**出现）\n" +
+        "空段省略。模式 integrate_document / adapt_concepts 必须省略'当前题组题材'段。"
     ),
   courseCode: z
     .string()
@@ -163,9 +170,16 @@ async function runGenerateConceptsWithLint(
   try {
     return await runViaSchema(args);
   } catch (err) {
-    if (isUnsupportedResponseFormatError(err)) {
+    // 两类可恢复错误都降级到文本路径：
+    //  1. [unsupported_response_format] —— provider 拒绝 schema 模式（DeepSeek 等）
+    //  2. [schema_parse_failed] —— provider 接受 schema 但 LLM 输出不符合（如新字段
+    //     dramaticConflict 没写满 / 漏字段；常见于 prompt 升级后的过渡期）
+    if (isSchemaPathRecoverableError(err)) {
+      const reason = isUnsupportedResponseFormatError(err)
+        ? "unsupported by provider"
+        : "LLM output failed schema validation";
       console.warn(
-        "[designStageFile] schema path unsupported by provider — falling back to text path:",
+        `[designStageFile] schema path ${reason} — falling back to text path:`,
         err instanceof Error ? err.message : String(err),
       );
       return await runViaText(args);

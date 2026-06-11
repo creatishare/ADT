@@ -29,7 +29,8 @@ export function createValidateStageFileTool(
         "课节关卡知识点信息整理。若省略，服务端会自动从会话头锚源材料回填。"
       ),
       userGuidance: tolerantText(
-        "【极其重要】用户特别关心的验证重点或之前的踩坑点。必须传递！"
+        "【极其重要】按段落格式序列化的 accumulatedGuidance：mode 行 + 跨题组逻辑映射偏好 / 用词偏好 / 禁忌；" +
+          "验证跨多个题组的完整文档时**省略**'当前题组题材'段，避免单题组题材污染全局判分。必须传递！"
       ),
       courseCode: tolerantText(
         "课程编号，格式：L{单元}-{课节}-{高/低年级}-题组{编号}，如 L3-1-高-题组2。从课节文档文件名或内容中提取。"

@@ -21,7 +21,8 @@ export function createGenerateVisualDesignTool(
         .string()
         .optional()
         .describe(
-          "【极其重要】用户对于画面色调、艺术风格的偏好。必须传递！"
+          "【极其重要】按段落格式序列化的 accumulatedGuidance；视觉设计只关心 '## 用词与排版偏好'、" +
+            "'## 用户明确禁忌' 中的色调/风格/禁词，以及 '## 跨题组逻辑↔舞台映射偏好' 里的动作描述参考。"
         ),
       courseCode: z
         .string()

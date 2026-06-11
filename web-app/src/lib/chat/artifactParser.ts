@@ -336,6 +336,12 @@ export type AwaitingUserAction =
   | "validation_decision"
   | null;
 
+import {
+  parseGuidance,
+  serializeGuidanceForPrompt,
+  type GuidanceModel,
+} from "@/lib/agents/guidance";
+
 export interface OrchestratorState {
   currentStep: number | null;
   currentLesson: string | null;
@@ -344,7 +350,22 @@ export interface OrchestratorState {
   processedGroups: string[];
   pendingGroups: string[];
   awaitingUser: AwaitingUserAction;
-  accumulatedGuidance: string[];
+  /**
+   * Structured, dimensioned guidance accumulator.
+   *
+   * As of 2026-05-11 the Orchestrator writes this as a typed object
+   * (see `GuidanceModel`). Pre-2026-05-11 sessions may have written a
+   * `string[]` here — `parseGuidance` accepts both and migrates the legacy
+   * shape into `wordingStyle` so old conversations keep rendering.
+   */
+  accumulatedGuidance: GuidanceModel;
+  /**
+   * Flat list view derived from `accumulatedGuidance` for callers that
+   * still want a single-line-per-item display (e.g. UI progress chips).
+   * Includes only cross-group dimensions; per-group themes are excluded
+   * to mirror the cross-group serialization scope.
+   */
+  guidanceLines: string[];
 }
 
 const STATE_BLOCK_REGEX = /```state\s*\n([\s\S]*?)\n```/;
@@ -356,7 +377,8 @@ export function parseOrchestratorState(
   const match = text.match(STATE_BLOCK_REGEX);
   if (!match || match[1] === undefined) return null;
   try {
-    const raw = JSON.parse(match[1]) as Partial<OrchestratorState>;
+    const raw = JSON.parse(match[1]) as Record<string, unknown>;
+    const guidance = parseGuidance(raw.accumulatedGuidance);
     return {
       currentStep: typeof raw.currentStep === "number" ? raw.currentStep : null,
       currentLesson:
@@ -366,25 +388,54 @@ export function parseOrchestratorState(
       totalGroups:
         typeof raw.totalGroups === "number" ? raw.totalGroups : null,
       processedGroups: Array.isArray(raw.processedGroups)
-        ? raw.processedGroups.filter((x): x is string => typeof x === "string")
+        ? (raw.processedGroups as unknown[]).filter(
+            (x): x is string => typeof x === "string",
+          )
         : [],
       pendingGroups: Array.isArray(raw.pendingGroups)
-        ? raw.pendingGroups.filter((x): x is string => typeof x === "string")
+        ? (raw.pendingGroups as unknown[]).filter(
+            (x): x is string => typeof x === "string",
+          )
         : [],
       awaitingUser:
         raw.awaitingUser === "concept_selection" ||
         raw.awaitingUser === "validation_decision"
           ? raw.awaitingUser
           : null,
-      accumulatedGuidance: Array.isArray(raw.accumulatedGuidance)
-        ? raw.accumulatedGuidance.filter(
-            (x): x is string => typeof x === "string"
-          )
-        : [],
+      accumulatedGuidance: guidance,
+      guidanceLines: flattenGuidanceForDisplay(guidance),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Flatten the cross-group dimensions of a `GuidanceModel` into single-line
+ * strings for legacy/UI callers that previously consumed `string[]`.
+ * Per-group themes are deliberately excluded.
+ */
+function flattenGuidanceForDisplay(guidance: GuidanceModel): string[] {
+  const out: string[] = [];
+  for (const p of guidance.logicVisualPatterns) {
+    const marker = p.polarity === "avoid" ? "✗" : "✓";
+    out.push(`${marker} ${p.construct} → ${p.pattern}`);
+  }
+  out.push(...guidance.wordingStyle);
+  for (const item of guidance.avoidances) out.push(`禁忌：${item}`);
+  return out;
+}
+
+/**
+ * Convenience: turn an `OrchestratorState`'s guidance into the segmented
+ * prompt-ready text that sub-agents consume, scoped to a specific course.
+ * Re-exported here so callers don't need to import `guidance.ts` directly.
+ */
+export function serializeStateGuidance(
+  state: Pick<OrchestratorState, "accumulatedGuidance">,
+  activeCourseCode?: string,
+): string {
+  return serializeGuidanceForPrompt(state.accumulatedGuidance, activeCourseCode);
 }
 
 export function parseAwaitingUser(text: string): AwaitingUserAction {

@@ -82,6 +82,12 @@ const cleanConceptList: ConceptList = {
     title: `干净概念 ${i + 1}`,
     themeDimension: "机械工程" as const,
     oneLineWrapper: `工程车在传送带循环 ${i + 1} 次抓取货物`,
+    dramaticConflict: {
+      blocker: `${i + 1} 件不同形状的货物分散在传送带不同位置，机械臂一次只能夹一件`,
+      whyThisCode:
+        "货物件数由调度系统在运行时下发，事前无法写死固定行数；只能用循环按件数迭代",
+      failureCost: "漏夹任何一件就触发流水线停机、整批订单作废",
+    },
     codeMapping: [
       {
         structure: "for 循环",
@@ -295,6 +301,70 @@ describe("designStageFile · text fallback when provider rejects schema mode", (
 
     expect(objectSpy).toHaveBeenCalledTimes(1);
     expect(textSpy).not.toHaveBeenCalled();
+
+    objectSpy.mockRestore();
+    textSpy.mockRestore();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 新增 fallback 触发点：provider 接受 schema 但 LLM 输出不符合 schema。
+// 真实失败案例（用户反馈 2026-05-13）：concept-schema 升级加入 dramaticConflict 后，
+// Gemini schema 模式偶发 "No object generated: could not parse the response"。
+// 此前只有 [unsupported_response_format] 会 fallback，这种 case 直接报红。
+// -----------------------------------------------------------------------------
+
+describe("designStageFile · text fallback when LLM output fails schema validation", () => {
+  it("falls back to runSubAgentText on [schema_parse_failed]", async () => {
+    const objectSpy = vi
+      .spyOn(shared, "runSubAgentObject")
+      .mockRejectedValueOnce(
+        new Error(
+          "[schema_parse_failed] 子 Agent 结构化输出未通过 schema 校验（缺字段 / 长度不足 / 格式偏离），将回退到文本路径。原始错误：No object generated: could not parse the response.",
+        ),
+      );
+    const textSpy = vi
+      .spyOn(shared, "runSubAgentText")
+      .mockResolvedValueOnce(cleanMarkdown);
+
+    const result = await __testables.runGenerateConceptsWithLint({
+      subAgentModel: fakeModel,
+      modelId: "gemini-3.1",
+      system: "test",
+      prompt: "生成 5 个概念",
+      timeoutMs: 60_000,
+    });
+
+    expect(objectSpy).toHaveBeenCalledTimes(1);
+    expect(textSpy).toHaveBeenCalledTimes(1);
+    expect(result.markdown).toBe(cleanMarkdown);
+    expect(result.lintHitsAfterRetry).toEqual([]);
+
+    objectSpy.mockRestore();
+    textSpy.mockRestore();
+  });
+
+  it("schema_parse_failed fallback also feeds the lint+retry loop", async () => {
+    const objectSpy = vi
+      .spyOn(shared, "runSubAgentObject")
+      .mockRejectedValueOnce(new Error("[schema_parse_failed] ..."));
+    const textSpy = vi
+      .spyOn(shared, "runSubAgentText")
+      .mockResolvedValueOnce(dirtyMarkdown)
+      .mockResolvedValueOnce(cleanMarkdown);
+
+    const result = await __testables.runGenerateConceptsWithLint({
+      subAgentModel: fakeModel,
+      modelId: "gemini-3.1",
+      system: "test",
+      prompt: "生成 5 个概念",
+      timeoutMs: 60_000,
+    });
+
+    expect(objectSpy).toHaveBeenCalledTimes(1);
+    expect(textSpy).toHaveBeenCalledTimes(2);
+    expect(result.markdown).toBe(cleanMarkdown);
+    expect(result.lintHitsAfterRetry).toEqual([]);
 
     objectSpy.mockRestore();
     textSpy.mockRestore();
