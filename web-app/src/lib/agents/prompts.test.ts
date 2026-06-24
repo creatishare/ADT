@@ -111,6 +111,18 @@ describe("prompts: planning-mode branches", () => {
       );
     });
 
+    it("maps an affirmative reply at validation_decision to '直接通过' so 满意 advances", () => {
+      // 回归保护：用户在验证决策节点回复"满意/通过"必须等同于 C 直接通过，
+      // 否则编排器停在 awaitingUser=validation_decision 反复复述 A/B/C 问句，
+      // 永不调用 writeStageFile（线上"回复多次满意但策划不往下走"的根因）。
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("满意");
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(
+        /validation_decision[\s\S]*?满意[\s\S]*?writeStageFile/,
+      );
+      // 必须显式禁止"原样复述问句 / 空转"
+      expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/满意[\s\S]*?(直接通过|视为)/);
+    });
+
     it("instructs integration mode to call adapt_concepts and skip 5-concept generation", () => {
       expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("adapt_concepts");
       expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/integration[\s\S]*?跳过/);

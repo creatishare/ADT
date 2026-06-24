@@ -33,12 +33,44 @@ export function getMessageText(message: RequestMessage) {
     .join("\n");
 }
 
+/**
+ * Compact one-line summary of the tool calls inside a message, e.g.
+ * `[工具完成:validateStageFile]`. Tool parts carry the only signal of
+ * *within-turn* progress (integrate → validate often happen in a single
+ * assistant turn), and `getMessageText` drops them entirely. Without this the
+ * memory extractor only sees text and can report a stale workflow stage
+ * (observed: "第2步 concept" long after validation already ran), which nudges
+ * the orchestrator back toward the concept phase instead of recognizing it is
+ * awaiting a validation decision.
+ */
+function getToolMarkers(message: RequestMessage): string {
+  const tools = (message.parts ?? [])
+    .filter(
+      (part) =>
+        part.type === "dynamic-tool" ||
+        (typeof part.type === "string" && part.type.startsWith("tool-")),
+    )
+    .map((part) => {
+      const name =
+        part.toolName ??
+        (typeof part.type === "string" ? part.type.replace(/^tool-/, "") : "") ??
+        "tool";
+      const done = part.state === "output-available";
+      return `${done ? "工具完成" : "工具调用"}:${name}`;
+    })
+    .filter((marker) => !marker.endsWith(":"));
+
+  return tools.length ? `[${tools.join(" / ")}]` : "";
+}
+
 export function buildTranscript(messages: RequestMessage[]) {
   return messages
     .map((message) => {
       const text = truncateText(getMessageText(message), 300);
-      if (!text) return null;
-      return `${message.role === "user" ? "用户" : "助手"}：${text}`;
+      const tools = getToolMarkers(message);
+      const body = [text, tools].filter(Boolean).join(" ");
+      if (!body) return null;
+      return `${message.role === "user" ? "用户" : "助手"}：${body}`;
     })
     .filter(Boolean)
     .join("\n");

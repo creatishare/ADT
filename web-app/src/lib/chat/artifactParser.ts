@@ -458,7 +458,7 @@ export function getAwaitingUserLabel(action: AwaitingUserAction): string {
     case "concept_selection":
       return "等待你挑选 1 个包装概念（输入编号 1-5）";
     case "validation_decision":
-      return "等待你决定验证意见处理方式（A 全部采纳 / B 部分采纳 / C 直接通过）";
+      return "等待你决定验证意见处理方式（A 全部采纳 / B 部分采纳 / C 直接通过；也可直接回复『满意/通过』定稿）";
     default:
       return "";
   }

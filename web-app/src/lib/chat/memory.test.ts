@@ -74,6 +74,21 @@ describe("memory helpers", () => {
     expect(transcript).toContain("助手：收到，会保持科学具象化");
   });
 
+  it("surfaces tool progress in the transcript even when a turn has no text", () => {
+    // 回归保护：integrate→validate 常在同一轮内完成且无文本，旧实现只取文本会
+    // 整条丢弃，导致记忆器把流程状态写回概念阶段。工具标记必须进入 transcript。
+    const transcript = buildTranscript([
+      {
+        role: "assistant",
+        parts: [
+          { type: "dynamic-tool", toolName: "validateStageFile", state: "output-available" },
+        ],
+      },
+    ]);
+
+    expect(transcript).toContain("工具完成:validateStageFile");
+  });
+
   it("builds layered memory context from structured memory", () => {
     const context = buildLayeredMemoryContext({
       userConstraints: ["不要出现魔法元素", "整体文风保持幽默"],
