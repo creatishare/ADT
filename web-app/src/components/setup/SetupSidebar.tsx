@@ -318,7 +318,7 @@ export function SetupSidebar() {
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3 [&>*]:shrink-0">
         <SessionSwitcher />
 
         <ModeSelector value={planningMode} onChange={handleModeChange} />
@@ -490,7 +490,7 @@ export function SetupSidebar() {
                   </div>
                 </div>
 
-                <ul className="max-h-64 overflow-y-auto">
+                <ul>
                   {sortedArtifacts.map((artifact) => {
                     const isSelected = selectedIds.includes(artifact.id);
                     const Icon =
